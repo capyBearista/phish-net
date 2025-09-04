@@ -52,13 +52,11 @@ Out of Scope for Version 1.0:
 
     Direct email client integration (e.g., Outlook/Gmail plugins).
 
-    File upload functionality for .eml files.
-
     Live URL scanning or reputation checks.
 
     Analysis of attachments or images.
 
-5. Non-Functional Requirements
+1. Non-Functional Requirements
 
     Privacy: The analysis of user-submitted content must be processed locally on the user's machine. No email data should be transmitted to external, third-party servers for analysis in the default configuration.
 
@@ -66,7 +64,7 @@ Out of Scope for Version 1.0:
 
     Performance: The analysis should be completed within a reasonable timeframe (e.g., 30 to 60 seconds) on consumer-grade hardware running a local LLM.
 
-6. Assumptions & Constraints
+2. Assumptions & Constraints
 
     Assumption: The user is capable of accessing the "full source" or "original message" of an email from their email client.
 
