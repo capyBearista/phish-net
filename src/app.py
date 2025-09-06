@@ -9,6 +9,10 @@ import os
 import time
 import re
 from datetime import datetime
+try:
+    from .email_processor import EmailProcessor
+except ImportError:
+    from email_processor import EmailProcessor
 
 # Page configuration
 st.set_page_config(
@@ -23,6 +27,8 @@ def main():
     # Initialize session state
     if 'analysis_history' not in st.session_state:
         st.session_state.analysis_history = []
+    if 'email_processor' not in st.session_state:
+        st.session_state.email_processor = EmailProcessor()
     
     # Custom CSS for better styling
     st.markdown("""
@@ -100,7 +106,7 @@ def main():
         with col1:
             if st.button("🔄 Test Connection", use_container_width=True):
                 with st.spinner("Testing connection..."):
-                    if test_ollama_connection(ollama_url):
+                    if test_ollama_connection(ollama_url or "http://localhost:11434"):
                         st.success("✅ Connected!")
                         st.rerun()
                     else:
@@ -164,7 +170,10 @@ def main():
             
             # Real-time input validation
             if email_content:
-                validation_results = validate_email_input(email_content)
+                # Process email for validation
+                processor = st.session_state.email_processor
+                processed_email = processor.process_email(email_content, is_file_content=False)
+                validation_results = validate_email_input(email_content, processed_email)
                 display_input_validation(validation_results)
             
         else:  # Upload .eml File
@@ -178,10 +187,20 @@ def main():
             
             if uploaded_file is not None:
                 try:
-                    email_content = uploaded_file.read().decode('utf-8', errors='replace')
+                    # Read file content
+                    file_content = uploaded_file.read().decode('utf-8', errors='replace')
+                    email_content = file_content
+                    
+                    # Process the email using EmailProcessor
+                    processor = st.session_state.email_processor
+                    processed_email = processor.process_email(file_content, is_file_content=True)
+                    
+                    # Store processed data for later use
+                    st.session_state.current_processed_email = processed_email
+                    
                     file_info = {
                         "name": uploaded_file.name,
-                        "size": len(email_content),
+                        "size": len(file_content),
                         "type": uploaded_file.type
                     }
                     
@@ -194,21 +213,55 @@ def main():
                     with col_info3:
                         st.metric("🏷️ Type", file_info["type"] or "text/plain")
                     
+                    # Show processing results
+                    if processed_email["success"]:
+                        # Email metadata
+                        metadata = processed_email.get("metadata", {})
+                        col_meta1, col_meta2, col_meta3 = st.columns(3)
+                        with col_meta1:
+                            st.metric("📧 Headers Found", metadata.get("header_count", 0))
+                        with col_meta2:
+                            st.metric("🔗 URLs Found", metadata.get("url_count", 0))
+                        with col_meta3:
+                            st.metric("⚠️ Suspicious URLs", metadata.get("suspicious_url_count", 0))
+                        
+                        # Email headers preview
+                        headers = processed_email.get("headers", {})
+                        if headers:
+                            with st.expander("📋 Email Headers"):
+                                for key, value in headers.items():
+                                    if key in ['from', 'to', 'subject', 'date']:
+                                        st.markdown(f"**{key.upper()}:** {value}")
+                        
+                        # URLs preview
+                        urls = processed_email.get("urls", [])
+                        if urls:
+                            with st.expander(f"🔗 URLs Found ({len(urls)})"):
+                                for url_data in urls[:5]:  # Show first 5
+                                    url_status = ""
+                                    if url_data.get("is_shortened"):
+                                        url_status += "🔗 SHORTENED "
+                                    if url_data.get("is_suspicious"):
+                                        url_status += "⚠️ SUSPICIOUS "
+                                    st.markdown(f"• {url_status}{url_data['url']}")
+                                if len(urls) > 5:
+                                    st.markdown(f"... and {len(urls) - 5} more URLs")
+                    
                     # Email content preview
                     preview_length = 1000
-                    preview_text = email_content[:preview_length]
-                    if len(email_content) > preview_length:
-                        preview_text += f"\n\n... ({len(email_content) - preview_length:,} more characters)"
+                    preview_text = file_content[:preview_length]
+                    if len(file_content) > preview_length:
+                        preview_text += f"\n\n... ({len(file_content) - preview_length:,} more characters)"
                     
                     st.text_area(
                         "📋 Email content preview:",
                         value=preview_text,
                         height=200,
                         disabled=True,
-                        help=f"Showing first {preview_length} characters of {len(email_content):,} total"
+                        help=f"Showing first {preview_length} characters of {len(file_content):,} total"
                     )
                     
-                    validation_results = validate_email_input(email_content)
+                    validation_results = validate_email_input(file_content, processed_email)
                     display_input_validation(validation_results)
                     
                 except UnicodeDecodeError as e:
@@ -216,6 +269,7 @@ def main():
                     st.info("💡 Try saving the email as a .txt file with UTF-8 encoding")
                 except Exception as e:
                     st.error(f"❌ Error reading file: {str(e)}")
+                    st.exception(e)
         
         # Input statistics
         if email_content:
@@ -243,7 +297,16 @@ def main():
         
         if st.button(analyze_button_text, type="primary", disabled=analyze_disabled, use_container_width=True):
             if email_content.strip() and validation_results["valid"]:
-                analyze_email(email_content, ollama_url or "", model_name or "")
+                # Process email content if not already processed
+                processed_email_data = None
+                if 'current_processed_email' in st.session_state:
+                    processed_email_data = st.session_state.current_processed_email
+                else:
+                    # Process plain text email
+                    processor = st.session_state.email_processor
+                    processed_email_data = processor.process_email(email_content, is_file_content=False)
+                
+                analyze_email(email_content, ollama_url or "", model_name or "", processed_email_data)
     
     with col2:
         st.header("📊 Analysis Results")
@@ -303,7 +366,7 @@ def test_ollama_connection(ollama_url: str) -> bool:
         return False
 
 
-def analyze_email(email_content: str, ollama_url: str, model_name: str):
+def analyze_email(email_content: str, ollama_url: str, model_name: str, processed_data: Optional[Dict] = None):
     """Analyze email content for phishing indicators"""
     
     # Create progress tracking
@@ -331,9 +394,9 @@ def analyze_email(email_content: str, ollama_url: str, model_name: str):
         progress_bar.progress(90)
         
         # Enhanced placeholder analysis with dynamic scoring
-        risk_score = calculate_basic_risk_score(email_content)
+        risk_score = calculate_basic_risk_score(email_content, processed_data)
         risk_level = get_risk_level(risk_score)
-        red_flags = identify_basic_red_flags(email_content)
+        red_flags = identify_basic_red_flags(email_content, processed_data)
         
         results = {
             "risk_score": risk_score,
@@ -510,7 +573,7 @@ def show_available_models(ollama_url: str):
         st.error(f"❌ Connection error: {str(e)}")
 
 
-def validate_email_input(email_content: str) -> Dict:
+def validate_email_input(email_content: str, processed_data: Optional[Dict] = None) -> Dict:
     """Validate email input and provide feedback"""
     validation = {"valid": True, "warnings": [], "info": []}
     
@@ -523,29 +586,66 @@ def validate_email_input(email_content: str) -> Dict:
     if len(email_content.strip()) < 50:
         validation["warnings"].append("Email content is quite short - may not provide enough context for analysis")
     
-    # Check for email headers
-    header_patterns = ["from:", "to:", "subject:", "date:"]
-    headers_found = sum(1 for pattern in header_patterns if pattern in email_content.lower())
-    
-    if headers_found == 0:
-        validation["info"].append("💡 Consider including email headers (From, To, Subject) for better analysis")
-    elif headers_found < 3:
-        validation["info"].append("💡 More email headers would improve analysis accuracy")
-    
-    # Check for suspicious patterns (basic validation)
-    suspicious_patterns = [
-        r'https?://[^\s]+',  # URLs
-        r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',  # Email addresses
-    ]
-    
-    for pattern in suspicious_patterns:
-        if re.search(pattern, email_content, re.IGNORECASE):
-            validation["info"].append("✅ Email contains URLs/addresses - good for phishing analysis")
-            break
+    # Use processed data if available for better validation
+    if processed_data and processed_data.get("success"):
+        metadata = processed_data.get("metadata", {})
+        headers = processed_data.get("headers", {})
+        urls = processed_data.get("urls", [])
+        
+        # Header validation
+        header_count = metadata.get("header_count", 0)
+        if header_count == 0:
+            validation["info"].append("💡 No email headers detected - consider including From, To, Subject for better analysis")
+        elif header_count < 3:
+            validation["info"].append("💡 Limited email headers - more headers improve analysis accuracy")
+        else:
+            validation["info"].append(f"✅ Good email structure with {header_count} headers detected")
+        
+        # URL validation
+        url_count = metadata.get("url_count", 0)
+        suspicious_count = metadata.get("suspicious_url_count", 0)
+        
+        if url_count > 0:
+            if suspicious_count > 0:
+                validation["warnings"].append(f"⚠️ {suspicious_count} suspicious URL(s) detected - good for phishing analysis")
+            else:
+                validation["info"].append(f"✅ {url_count} URL(s) found - good for analysis")
+        
+        # Email format validation
+        email_format = processed_data.get("format", "unknown")
+        if email_format == "eml":
+            validation["info"].append("✅ Proper .eml format detected - optimal for analysis")
+        elif email_format == "plain_text":
+            validation["info"].append("📝 Plain text format - analysis possible but headers help")
+    else:
+        # Fallback to basic validation
+        header_patterns = ["from:", "to:", "subject:", "date:"]
+        headers_found = sum(1 for pattern in header_patterns if pattern in email_content.lower())
+        
+        if headers_found == 0:
+            validation["info"].append("💡 Consider including email headers (From, To, Subject) for better analysis")
+        elif headers_found < 3:
+            validation["info"].append("💡 More email headers would improve analysis accuracy")
+        else:
+            validation["info"].append(f"✅ {headers_found} email headers detected")
+        
+        # Check for URLs and email addresses
+        url_pattern = r'https?://[^\s]+'
+        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+        
+        urls_found = len(re.findall(url_pattern, email_content, re.IGNORECASE))
+        emails_found = len(re.findall(email_pattern, email_content))
+        
+        if urls_found > 0:
+            validation["info"].append(f"✅ {urls_found} URL(s) found - good for phishing analysis")
+        if emails_found > 0:
+            validation["info"].append(f"✅ {emails_found} email address(es) found")
     
     # Check length limits
-    if len(email_content) > 10000:
+    if len(email_content) > 15000:
         validation["warnings"].append("⚠️ Very long email - analysis may take longer")
+    elif len(email_content) > 10000:
+        validation["info"].append("📏 Large email - comprehensive analysis possible")
     
     return validation
 
@@ -587,90 +687,169 @@ Generated: {results.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S'
         st.error(f"❌ Failed to copy results: {str(e)}")
 
 
-def calculate_basic_risk_score(email_content: str) -> int:
-    """Calculate a basic risk score based on simple heuristics"""
+def calculate_basic_risk_score(email_content: str, processed_data: Optional[Dict] = None) -> int:
+    """Calculate a basic risk score based on simple heuristics and processed data"""
     score = 1  # Start with low risk
     content_lower = email_content.lower()
     
-    # Urgent language indicators (+2-3 points each)
-    urgent_keywords = ["urgent", "immediate", "expire", "suspend", "verify", "click here", "act now", "limited time"]
-    for keyword in urgent_keywords:
-        if keyword in content_lower:
+    # Use processed data if available for more accurate analysis
+    if processed_data and processed_data.get("success"):
+        metadata = processed_data.get("metadata", {})
+        urls = processed_data.get("urls", [])
+        headers = processed_data.get("headers", {})
+        
+        # URL-based scoring (more accurate with processed data)
+        suspicious_url_count = metadata.get("suspicious_url_count", 0)
+        shortened_url_count = metadata.get("shortened_url_count", 0)
+        
+        score += suspicious_url_count * 3  # +3 per suspicious URL
+        score += shortened_url_count * 2   # +2 per shortened URL
+        
+        # Header-based analysis
+        if not headers.get("from"):
+            score += 2  # Missing From header
+        
+        from_address = headers.get("from", "").lower()
+        subject = headers.get("subject", "").lower()
+        
+        # Check for spoofed domains in From header
+        spoofed_domains = ["paypal", "amazon", "microsoft", "google", "apple", "facebook"]
+        for domain in spoofed_domains:
+            if domain in from_address and not from_address.endswith(f"@{domain}.com"):
+                score += 4
+        
+        # Subject line analysis
+        if any(word in subject for word in ["urgent", "verify", "suspend", "expire", "immediate"]):
             score += 2
     
-    # Suspicious URLs (+2-4 points)
-    suspicious_url_patterns = [
-        r'bit\.ly', r'tinyurl', r'short\.link',  # URL shorteners
-        r'[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}',  # IP addresses
-    ]
-    for pattern in suspicious_url_patterns:
-        if re.search(pattern, email_content, re.IGNORECASE):
-            score += 3
+    # Fallback to content-based analysis
+    # Urgent language indicators (+2-3 points each)
+    urgent_keywords = ["urgent", "immediate", "expire", "suspend", "verify", "click here", "act now", "limited time"]
+    urgent_matches = sum(1 for keyword in urgent_keywords if keyword in content_lower)
+    score += min(urgent_matches * 2, 6)  # Cap urgent language bonus
     
     # Generic greetings (+1-2 points)
-    generic_greetings = ["dear customer", "dear user", "dear sir/madam", "hello"]
+    generic_greetings = ["dear customer", "dear user", "dear sir/madam", "valued customer"]
     for greeting in generic_greetings:
         if greeting in content_lower:
             score += 1
+            break  # Only count once
     
-    # Spelling/grammar issues (+1-2 points)
-    if len(re.findall(r'\s{2,}', email_content)) > 3:  # Multiple spaces
+    # Financial/personal info requests (+3 points each, max 6)
+    sensitive_requests = ["password", "social security", "credit card", "bank account", "ssn", "pin number"]
+    sensitive_matches = sum(1 for request in sensitive_requests if request in content_lower)
+    score += min(sensitive_matches * 3, 6)
+    
+    # Grammar/spelling issues indicators
+    if len(re.findall(r'\s{2,}', email_content)) > 5:  # Excessive spacing
         score += 1
     
-    # Financial/personal info requests (+3 points)
-    sensitive_requests = ["password", "social security", "credit card", "bank account", "ssn"]
-    for request in sensitive_requests:
-        if request in content_lower:
-            score += 3
-    
-    # Domain mismatches (basic check) (+2 points)
-    if re.search(r'paypal.*\.(?!com)', content_lower) or re.search(r'amazon.*\.(?!com)', content_lower):
-        score += 2
+    # Check for urgency phrases
+    urgency_phrases = ["within 24 hours", "account will be", "suspended", "limited access", "verify now"]
+    urgency_matches = sum(1 for phrase in urgency_phrases if phrase in content_lower)
+    score += min(urgency_matches, 3)
     
     return min(score, 10)  # Cap at 10
 
 
-def identify_basic_red_flags(email_content: str) -> List[str]:
-    """Identify basic red flags in email content"""
+def identify_basic_red_flags(email_content: str, processed_data: Optional[Dict] = None) -> List[str]:
+    """Identify basic red flags in email content using processed data when available"""
     red_flags = []
     content_lower = email_content.lower()
     
+    # Use processed data for more accurate analysis
+    if processed_data and processed_data.get("success"):
+        metadata = processed_data.get("metadata", {})
+        urls = processed_data.get("urls", [])
+        headers = processed_data.get("headers", {})
+        
+        # URL-based red flags
+        suspicious_urls = [url for url in urls if url.get("is_suspicious")]
+        shortened_urls = [url for url in urls if url.get("is_shortened")]
+        
+        if suspicious_urls:
+            red_flags.append(f"Contains {len(suspicious_urls)} suspicious URL(s)")
+        
+        if shortened_urls:
+            red_flags.append(f"Contains {len(shortened_urls)} shortened URL(s)")
+        
+        # Header-based analysis
+        from_address = headers.get("from", "").lower()
+        subject = headers.get("subject", "").lower()
+        
+        # Check for domain spoofing in From header
+        spoofed_indicators = []
+        spoofed_domains = ["paypal", "amazon", "microsoft", "google", "apple"]
+        for domain in spoofed_domains:
+            if domain in from_address and not from_address.endswith(f"@{domain}.com"):
+                spoofed_indicators.append(domain)
+        
+        if spoofed_indicators:
+            red_flags.append(f"Suspicious sender domain spoofing: {', '.join(spoofed_indicators)}")
+        
+        # Subject analysis
+        urgent_subject_words = ["urgent", "verify", "suspend", "expire", "immediate", "action required"]
+        subject_flags = [word for word in urgent_subject_words if word in subject]
+        if subject_flags:
+            red_flags.append(f"Urgent language in subject: {', '.join(subject_flags)}")
+        
+        # Missing critical headers
+        if not headers.get("from"):
+            red_flags.append("Missing sender information")
+        
+    # Content-based analysis (always performed)
+    
     # Check for urgent language
-    urgent_keywords = ["urgent", "immediate", "expire", "suspend", "verify immediately"]
-    for keyword in urgent_keywords:
-        if keyword in content_lower:
-            red_flags.append(f"Urgent language: Contains '{keyword}'")
-            break
+    urgent_phrases = [
+        "urgent", "immediate", "expire", "suspend", "verify immediately",
+        "account will be", "within 24 hours", "act now", "limited time"
+    ]
+    found_urgent = [phrase for phrase in urgent_phrases if phrase in content_lower]
+    if found_urgent:
+        red_flags.append(f"Urgent/threatening language: {found_urgent[0]}")
     
     # Check for generic greetings
-    generic_greetings = ["dear customer", "dear user", "dear sir/madam"]
+    generic_greetings = ["dear customer", "dear user", "dear sir/madam", "valued customer"]
     for greeting in generic_greetings:
         if greeting in content_lower:
             red_flags.append("Generic greeting without personalization")
             break
     
-    # Check for suspicious URLs
-    if re.search(r'bit\.ly|tinyurl|short\.link', email_content, re.IGNORECASE):
-        red_flags.append("Contains shortened URLs")
+    # Check for requests for sensitive information
+    sensitive_requests = [
+        "password", "social security", "credit card", "bank account", 
+        "ssn", "pin number", "security code", "verification code"
+    ]
+    found_requests = [req for req in sensitive_requests if req in content_lower]
+    if found_requests:
+        red_flags.append(f"Requests sensitive information: {', '.join(found_requests[:2])}")
     
-    if re.search(r'[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}', email_content):
-        red_flags.append("Contains IP address instead of domain name")
+    # Check for pressure tactics
+    pressure_phrases = [
+        "account will be suspended", "immediate action", "verify now", 
+        "click here immediately", "your account has been"
+    ]
+    found_pressure = [phrase for phrase in pressure_phrases if phrase in content_lower]
+    if found_pressure:
+        red_flags.append(f"Uses pressure tactics: {found_pressure[0]}")
     
-    # Check for financial requests
-    financial_keywords = ["password", "social security", "credit card", "bank account"]
-    for keyword in financial_keywords:
-        if keyword in content_lower:
-            red_flags.append(f"Requests sensitive information: {keyword}")
-    
-    # Check for domain spoofing (basic)
-    if re.search(r'paypal.*\.(?!com)', content_lower):
-        red_flags.append("Suspicious PayPal domain detected")
-    if re.search(r'amazon.*\.(?!com)', content_lower):
-        red_flags.append("Suspicious Amazon domain detected")
-    
-    # Check for missing headers
-    if not re.search(r'^from:', email_content, re.MULTILINE | re.IGNORECASE):
-        red_flags.append("Missing or incomplete email headers")
+    # Fallback URL checks if processed data not available
+    if not processed_data or not processed_data.get("success"):
+        if re.search(r'bit\.ly|tinyurl|short\.link', email_content, re.IGNORECASE):
+            red_flags.append("Contains shortened URLs")
+        
+        if re.search(r'[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}', email_content):
+            red_flags.append("Contains IP address instead of domain name")
+        
+        # Basic domain spoofing check
+        spoofing_patterns = [
+            r'paypal.*\.(?!com)', r'amazon.*\.(?!com)', 
+            r'microsoft.*\.(?!com)', r'google.*\.(?!com)'
+        ]
+        for pattern in spoofing_patterns:
+            if re.search(pattern, content_lower):
+                red_flags.append("Suspicious domain detected in content")
+                break
     
     return red_flags
 
