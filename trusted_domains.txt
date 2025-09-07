@@ -1,0 +1,30 @@
+# List of trusted email domains (one per line)
+github.com
+gitlab.com
+bitbucket.org
+microsoft.com
+outlook.com
+live.com
+hotmail.com
+google.com
+gmail.com
+googlemail.com
+apple.com
+icloud.com
+paypal.com
+paypal-communications.com
+amazon.com
+amazon.ca
+amazon.co.uk
+facebook.com
+meta.com
+twitter.com
+x.com
+linkedin.com
+dropbox.com
+slack.com
+zoom.us
+notion.so
+atlassian.com
+atlassian.net
+# More domains to be added...

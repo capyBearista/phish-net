@@ -36,26 +36,28 @@ class EmailProcessor:
     headers, body content, URLs, and metadata for LLM analysis.
     """
     
-    # Trusted domains for legitimate notifications
-    TRUSTED_DOMAINS = {
-        'github.com', 'gitlab.com', 'bitbucket.org',
-        'microsoft.com', 'outlook.com', 'live.com', 'hotmail.com',
-        'google.com', 'gmail.com', 'googlemail.com',
-        'apple.com', 'icloud.com',
-        'paypal.com', 'paypal-communications.com',
-        'amazon.com', 'amazon.ca', 'amazon.co.uk',
-        'facebook.com', 'meta.com',
-        'twitter.com', 'x.com',
-        'linkedin.com',
-        'dropbox.com',
-        'slack.com',
-        'zoom.us',
-        'notion.so',
-        'atlassian.com', 'atlassian.net'
-    }
+    # Trusted domains loaded from file
+    TRUSTED_DOMAINS = set()
     
-    def __init__(self):
+    def __init__(self, trusted_domains_path: str = "trusted_domains.txt"):
         self.parser = Parser()
+        self._load_trusted_domains(trusted_domains_path)
+
+    def _load_trusted_domains(self, path: str):
+        """Load trusted domains from a file (one per line, ignore comments/empty lines)"""
+        try:
+            with open(path, "r") as f:
+                domains = set()
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        domains.add(line.lower())
+                self.TRUSTED_DOMAINS = domains
+        except Exception as e:
+            # If file missing, fallback to empty set
+            self.TRUSTED_DOMAINS = set()
+            # Optionally log error or print warning
+            print(f"WARNING: Could not load trusted domains from {path}: {e}")
         
     def process_email(self, content: str, is_file_content: bool = False) -> Dict:
         """
