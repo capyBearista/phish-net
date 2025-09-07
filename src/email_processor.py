@@ -36,6 +36,24 @@ class EmailProcessor:
     headers, body content, URLs, and metadata for LLM analysis.
     """
     
+    # Trusted domains for legitimate notifications
+    TRUSTED_DOMAINS = {
+        'github.com', 'gitlab.com', 'bitbucket.org',
+        'microsoft.com', 'outlook.com', 'live.com', 'hotmail.com',
+        'google.com', 'gmail.com', 'googlemail.com',
+        'apple.com', 'icloud.com',
+        'paypal.com', 'paypal-communications.com',
+        'amazon.com', 'amazon.ca', 'amazon.co.uk',
+        'facebook.com', 'meta.com',
+        'twitter.com', 'x.com',
+        'linkedin.com',
+        'dropbox.com',
+        'slack.com',
+        'zoom.us',
+        'notion.so',
+        'atlassian.com', 'atlassian.net'
+    }
+    
     def __init__(self):
         self.parser = Parser()
         
@@ -376,6 +394,9 @@ class EmailProcessor:
     
     def _generate_metadata(self, headers: Dict, body: Dict, urls: List) -> Dict:
         """Generate metadata about the email"""
+        sender_email = headers.get("from", "")
+        is_trusted = self._is_trusted_sender(sender_email)
+        
         return {
             "has_headers": len(headers) > 0,
             "header_count": len(headers),
@@ -384,6 +405,8 @@ class EmailProcessor:
             "url_count": len(urls),
             "suspicious_url_count": sum(1 for url in urls if url.get("is_suspicious", False)),
             "shortened_url_count": sum(1 for url in urls if url.get("is_shortened", False)),
+            "sender_trusted": is_trusted,
+            "sender_domain": sender_email.split('@')[-1].lower() if '@' in sender_email else "",
             "processing_timestamp": datetime.now().isoformat()
         }
     
@@ -472,6 +495,13 @@ class EmailProcessor:
         """Basic heuristic to identify potentially suspicious URLs"""
         url_lower = url.lower()
         
+        # Extract domain from URL
+        domain = self._extract_domain(url_lower).lower()
+        
+        # Check against trusted domains first
+        if any(domain.endswith(f'.{trusted}') or domain == trusted for trusted in self.TRUSTED_DOMAINS):
+            return False
+        
         # Check for IP addresses instead of domains
         if re.search(r'https?://[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}', url):
             return True
@@ -490,6 +520,14 @@ class EmailProcessor:
                 return True
         
         return False
+    
+    def _is_trusted_sender(self, sender_email: str) -> bool:
+        """Check if sender email is from a trusted domain"""
+        if not sender_email or '@' not in sender_email:
+            return False
+            
+        domain = sender_email.split('@')[-1].lower()
+        return any(domain.endswith(f'.{trusted}') or domain == trusted for trusted in self.TRUSTED_DOMAINS)
     
     def _extract_domain(self, url: str) -> str:
         """Extract domain from URL"""

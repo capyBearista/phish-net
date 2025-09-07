@@ -11,8 +11,10 @@ import re
 from datetime import datetime
 try:
     from .email_processor import EmailProcessor
+    from .llm_service import OllamaService
 except ImportError:
     from email_processor import EmailProcessor
+    from llm_service import OllamaService
 
 # Page configuration
 st.set_page_config(
@@ -29,6 +31,8 @@ def main():
         st.session_state.analysis_history = []
     if 'email_processor' not in st.session_state:
         st.session_state.email_processor = EmailProcessor()
+    if 'ollama_service' not in st.session_state:
+        st.session_state.ollama_service = None
     
     # Custom CSS for better styling
     st.markdown("""
@@ -82,8 +86,10 @@ def main():
         
         # Connection status indicator
         connection_status = check_ollama_status()
-        if connection_status["connected"]:
-            st.markdown(f'<div class="status-indicator status-connected">✅ Connected to Ollama</div>', unsafe_allow_html=True)
+        if connection_status["connected"] and connection_status.get("model_available"):
+            st.markdown(f'<div class="status-indicator status-connected">✅ Ollama & Model Ready</div>', unsafe_allow_html=True)
+        elif connection_status["connected"]:
+            st.markdown(f'<div class="status-indicator status-testing">⚠️ Connected - Model Not Found</div>', unsafe_allow_html=True)
         else:
             st.markdown(f'<div class="status-indicator status-disconnected">❌ Ollama Disconnected</div>', unsafe_allow_html=True)
         
@@ -121,6 +127,11 @@ def main():
             timeout = st.slider("Request Timeout (seconds)", 5, 60, 30)
             max_tokens = st.slider("Max Response Tokens", 500, 4000, 2000)
             temperature = st.slider("Model Temperature", 0.0, 1.0, 0.3, 0.1)
+            
+            # Store in session state
+            st.session_state.timeout = timeout
+            st.session_state.max_tokens = max_tokens
+            st.session_state.temperature = temperature
             
         # Analysis history
         if st.session_state.analysis_history:
@@ -294,6 +305,8 @@ def main():
             analyze_button_text = "⚠️ Fix Validation Issues"
         elif not connection_status["connected"]:
             analyze_button_text = "🔌 Connect to Ollama First"
+        elif not connection_status.get("model_available"):
+            analyze_button_text = "🤖 Analyze (Heuristic Mode)"
         
         if st.button(analyze_button_text, type="primary", disabled=analyze_disabled, use_container_width=True):
             if email_content.strip() and validation_results["valid"]:
@@ -367,7 +380,7 @@ def test_ollama_connection(ollama_url: str) -> bool:
 
 
 def analyze_email(email_content: str, ollama_url: str, model_name: str, processed_data: Optional[Dict] = None):
-    """Analyze email content for phishing indicators"""
+    """Analyze email content for phishing indicators using LLM"""
     
     # Create progress tracking
     progress_bar = st.progress(0)
@@ -376,37 +389,80 @@ def analyze_email(email_content: str, ollama_url: str, model_name: str, processe
     try:
         # Step 1: Preprocessing
         status_text.text("📝 Preprocessing email content...")
+        progress_bar.progress(10)
+        
+        if not processed_data:
+            processor = st.session_state.email_processor
+            processed_data = processor.process_email(email_content, is_file_content=False)
+        
+        # Step 2: Check LLM service availability
+        status_text.text("� Connecting to AI model...")
         progress_bar.progress(20)
-        time.sleep(0.5)
         
-        # Step 2: Basic analysis (placeholder for now)
-        status_text.text("🔍 Performing basic analysis...")
-        progress_bar.progress(40)
-        time.sleep(1)
+        # Ensure LLM service is configured
+        if (st.session_state.ollama_service is None or 
+            st.session_state.ollama_service.base_url != ollama_url or 
+            st.session_state.ollama_service.model != model_name):
+            
+            st.session_state.ollama_service = OllamaService(ollama_url, model_name)
         
-        # Step 3: LLM Analysis (placeholder for now)
-        status_text.text("🤖 Running AI analysis...")
-        progress_bar.progress(70)
-        time.sleep(1.5)
+        llm_service = st.session_state.ollama_service
         
-        # Step 4: Generate results
-        status_text.text("📊 Generating results...")
+        # Test connection
+        connection_status = llm_service.test_connection()
+        if not connection_status.get("connected"):
+            raise Exception(f"Cannot connect to Ollama: {connection_status.get('error', 'Unknown error')}")
+        
+        if not connection_status.get("model_available"):
+            # Fall back to heuristic analysis
+            status_text.text("⚠️ Model not available - using heuristic analysis...")
+            progress_bar.progress(50)
+            time.sleep(1)
+            
+            results = perform_fallback_analysis(email_content, processed_data)
+            
+        else:
+            # Step 3: LLM Analysis
+            status_text.text("🤖 Running AI analysis with phi4-mini-reasoning...")
+            progress_bar.progress(40)
+            
+            # Get advanced settings from session state
+            advanced_settings = {
+                "temperature": st.session_state.get("temperature", 0.3),
+                "max_tokens": st.session_state.get("max_tokens", 2000)
+            }
+            
+            # Perform LLM analysis
+            if processed_data:
+                llm_results = llm_service.analyze_email(processed_data, advanced_settings)
+            else:
+                raise Exception("No processed email data available")
+            
+            if llm_results.get("success"):
+                # Use LLM results
+                results = {
+                    "risk_score": llm_results["risk_score"],
+                    "risk_level": llm_results["risk_level"],
+                    "red_flags": llm_results["red_flags"],
+                    "reasoning": llm_results["reasoning"],
+                    "confidence": llm_results["confidence"],
+                    "recommendation": llm_results["recommendation"],
+                    "timestamp": llm_results["timestamp"],
+                    "email_length": len(email_content),
+                    "analysis_version": "2.0-llm",
+                    "model_used": llm_results["model_used"],
+                    "response_time": llm_results["response_time"]
+                }
+            else:
+                # Fall back to heuristic analysis
+                status_text.text("⚠️ LLM analysis failed - using heuristic analysis...")
+                results = perform_fallback_analysis(email_content, processed_data)
+                results["llm_error"] = llm_results.get("error", "Unknown LLM error")
+        
+        # Step 4: Finalize results
+        status_text.text("📊 Finalizing analysis...")
         progress_bar.progress(90)
-        
-        # Enhanced placeholder analysis with dynamic scoring
-        risk_score = calculate_basic_risk_score(email_content, processed_data)
-        risk_level = get_risk_level(risk_score)
-        red_flags = identify_basic_red_flags(email_content, processed_data)
-        
-        results = {
-            "risk_score": risk_score,
-            "risk_level": risk_level,
-            "red_flags": red_flags,
-            "reasoning": generate_reasoning(risk_score, red_flags),
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "email_length": len(email_content),
-            "analysis_version": "1.0-placeholder"
-        }
+        time.sleep(0.5)
         
         progress_bar.progress(100)
         status_text.text("✅ Analysis complete!")
@@ -420,15 +476,29 @@ def analyze_email(email_content: str, ollama_url: str, model_name: str, processe
         progress_bar.empty()
         status_text.empty()
         
-        # Show success message
-        st.success("🎯 Analysis completed successfully!")
+        # Show success message with method used
+        analysis_method = "AI-powered" if results.get("model_used") else "heuristic"
+        st.success(f"🎯 {analysis_method.title()} analysis completed successfully!")
+        
+        if results.get("llm_error"):
+            st.warning(f"⚠️ LLM analysis failed ({results['llm_error']}), used fallback method")
+        
         st.rerun()
         
     except Exception as e:
         progress_bar.empty()
         status_text.empty()
         st.error(f"❌ Analysis failed: {str(e)}")
-        st.exception(e)
+        
+        # Perform emergency fallback
+        try:
+            fallback_results = perform_fallback_analysis(email_content, processed_data)
+            fallback_results["error_details"] = str(e)
+            st.session_state.analysis_results = fallback_results
+            st.warning("🔄 Used emergency fallback analysis due to error")
+            st.rerun()
+        except:
+            st.exception(e)
 
 
 def display_results(results: Dict):
@@ -542,15 +612,27 @@ def get_risk_color(score: int) -> str:
 
 
 def check_ollama_status() -> Dict:
-    """Check Ollama connection status"""
+    """Check Ollama connection status using LLM service"""
     ollama_url = st.session_state.get("ollama_url", "http://localhost:11434")
+    model_name = st.session_state.get("model_name", "phi4-mini-reasoning")
+    
     try:
-        response = requests.get(f"{ollama_url}/api/tags", timeout=3)
-        if response.status_code == 200:
-            return {"connected": True, "models": response.json().get("models", [])}
-        else:
-            return {"connected": False, "error": f"HTTP {response.status_code}"}
-    except requests.exceptions.RequestException as e:
+        # Create or update the LLM service
+        if (st.session_state.ollama_service is None or 
+            st.session_state.ollama_service.base_url != ollama_url or 
+            st.session_state.ollama_service.model != model_name):
+            
+            st.session_state.ollama_service = OllamaService(ollama_url, model_name)
+        
+        # Test connection
+        status = st.session_state.ollama_service.test_connection()
+        return {
+            "connected": status.get("connected", False),
+            "model_available": status.get("model_available", False),
+            "available_models": status.get("available_models", []),
+            "error": status.get("error")
+        }
+    except Exception as e:
         return {"connected": False, "error": str(e)}
 
 
@@ -866,6 +948,26 @@ def generate_reasoning(risk_score: int, red_flags: List[str]) -> str:
         return f"This email shows {len(red_flags)} minor concerns but appears mostly legitimate. Standard email security practices should be sufficient."
     else:
         return "This email appears to be legitimate with no significant red flags detected. It follows normal email patterns and contains appropriate sender information."
+
+
+def perform_fallback_analysis(email_content: str, processed_data: Optional[Dict]) -> Dict:
+    """Perform heuristic-based analysis as fallback when LLM is unavailable"""
+    
+    risk_score = calculate_basic_risk_score(email_content, processed_data)
+    risk_level = get_risk_level(risk_score)
+    red_flags = identify_basic_red_flags(email_content, processed_data)
+    
+    return {
+        "risk_score": risk_score,
+        "risk_level": risk_level,
+        "red_flags": red_flags,
+        "reasoning": generate_reasoning(risk_score, red_flags),
+        "confidence": "medium" if len(red_flags) > 2 else "low",
+        "recommendation": "block" if risk_score >= 7 else "caution" if risk_score >= 4 else "ignore",
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "email_length": len(email_content),
+        "analysis_version": "1.0-heuristic"
+    }
 
 
 def load_sample_email(email_type: str):
