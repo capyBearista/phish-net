@@ -11,6 +11,12 @@ from typing import Dict, List, Optional, Tuple
 import time
 from datetime import datetime
 
+# Handle both relative and absolute imports
+try:
+    from .risk_assessment import RiskAssessment
+except ImportError:
+    from risk_assessment import RiskAssessment
+
 
 class OllamaService:
     """
@@ -25,6 +31,7 @@ class OllamaService:
         self.model = model
         self.timeout = 90  # Increased timeout for slower systems
         self.max_retries = 3
+        self.risk_assessor = RiskAssessment()
         
     def test_connection(self) -> Dict:
         """Test connection to Ollama and model availability"""
@@ -244,7 +251,7 @@ Begin analysis now. Output only the JSON response:
                 # Validate the response structure
                 validated_analysis = self._validate_analysis_response(analysis, processed_email)
                 
-                # Add metadata
+                # Add basic metadata
                 validated_analysis.update({
                     "success": True,
                     "model_used": self.model,
@@ -253,7 +260,13 @@ Begin analysis now. Output only the JSON response:
                     "raw_response_length": len(raw_response)
                 })
                 
-                return validated_analysis
+                # Apply comprehensive risk assessment framework
+                comprehensive_report = self.risk_assessor.generate_comprehensive_report(
+                    validated_analysis, 
+                    processed_email.get("metadata", {})
+                )
+                
+                return comprehensive_report
             
             else:
                 # Fallback: try to parse the entire response as JSON
@@ -265,7 +278,14 @@ Begin analysis now. Output only the JSON response:
                     "response_time": round(response_time, 2),
                     "timestamp": datetime.now().isoformat()
                 })
-                return validated_analysis
+                
+                # Apply comprehensive risk assessment framework
+                comprehensive_report = self.risk_assessor.generate_comprehensive_report(
+                    validated_analysis, 
+                    processed_email.get("metadata", {})
+                )
+                
+                return comprehensive_report
                 
         except json.JSONDecodeError:
             # If JSON parsing fails, try to extract information manually

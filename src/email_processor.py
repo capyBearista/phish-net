@@ -41,6 +41,13 @@ class EmailProcessor:
     
     def __init__(self, trusted_domains_path: str = "trusted_domains.txt"):
         self.parser = Parser()
+        # Handle relative path when running from different directories
+        import os
+        if not os.path.exists(trusted_domains_path):
+            # Try looking in the parent directory (project root)
+            parent_path = os.path.join("..", trusted_domains_path)
+            if os.path.exists(parent_path):
+                trusted_domains_path = parent_path
         self._load_trusted_domains(trusted_domains_path)
 
     def _load_trusted_domains(self, path: str):

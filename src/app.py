@@ -439,20 +439,13 @@ def analyze_email(email_content: str, ollama_url: str, model_name: str, processe
                 raise Exception("No processed email data available")
             
             if llm_results.get("success"):
-                # Use LLM results
-                results = {
-                    "risk_score": llm_results["risk_score"],
-                    "risk_level": llm_results["risk_level"],
-                    "red_flags": llm_results["red_flags"],
-                    "reasoning": llm_results["reasoning"],
-                    "confidence": llm_results["confidence"],
-                    "recommendation": llm_results["recommendation"],
-                    "timestamp": llm_results["timestamp"],
+                # Use the complete enhanced analysis from LLM service
+                results = llm_results.copy()
+                # Add any app-specific metadata
+                results.update({
                     "email_length": len(email_content),
-                    "analysis_version": "2.0-llm",
-                    "model_used": llm_results["model_used"],
-                    "response_time": llm_results["response_time"]
-                }
+                    "analysis_version": "2.0-llm-enhanced"
+                })
             else:
                 # Fall back to heuristic analysis
                 status_text.text("⚠️ LLM analysis failed - using heuristic analysis...")
@@ -502,13 +495,14 @@ def analyze_email(email_content: str, ollama_url: str, model_name: str, processe
 
 
 def display_results(results: Dict):
-    """Display enhanced analysis results"""
+    """Display enhanced analysis results with Phase 4 risk assessment"""
     risk_score = results.get("risk_score", 0)
-    risk_level = get_risk_level(risk_score)
+    risk_level = results.get("risk_level", get_risk_level(risk_score))
+    risk_color = results.get("risk_color", get_risk_color(risk_score))
+    confidence_score = results.get("confidence_score", 0.5)
+    confidence_level = results.get("confidence_level", "medium")
     
     # Main risk score display with enhanced styling
-    risk_color = get_risk_color(risk_score)
-    
     st.markdown(f"""
     <div style="
         padding: 1rem; 
@@ -526,26 +520,54 @@ def display_results(results: Dict):
     </div>
     """, unsafe_allow_html=True)
     
-    # Risk score visualization
-    col_score1, col_score2, col_score3 = st.columns(3)
+    # Enhanced risk score visualization
+    col_score1, col_score2, col_score3, col_score4 = st.columns(4)
     with col_score1:
         st.metric("🎯 Risk Score", f"{risk_score}/10")
     with col_score2:
-        st.metric("📊 Risk Category", risk_level)
+        st.metric("📊 Risk Level", risk_level)
     with col_score3:
-        confidence = "High" if len(results.get("red_flags", [])) > 2 else "Medium" if len(results.get("red_flags", [])) > 0 else "Low"
-        st.metric("🔍 Confidence", confidence)
+        st.metric("🔍 Confidence", f"{confidence_level.title()} ({confidence_score:.1f})")
+    with col_score4:
+        trusted = results.get("trusted_sender", False)
+        st.metric("� Sender", "Trusted ✅" if trusted else "Unknown ⚠️")
     
-    # Red flags with enhanced display
+    # Enhanced red flags display with categorization
     st.markdown("### 🚩 Identified Red Flags")
-    red_flags = results.get("red_flags", [])
+    red_flags_data = results.get("red_flags", {})
     
-    if red_flags:
-        for i, flag in enumerate(red_flags, 1):
-            severity = "🔴" if any(word in flag.lower() for word in ["urgent", "immediate", "suspend", "verify"]) else "🟡"
-            st.markdown(f"{severity} **{i}.** {flag}")
+    # Handle both old format (list) and new format (dict with categorization)
+    if isinstance(red_flags_data, list):
+        # Backward compatibility with old format
+        red_flags = red_flags_data
+        if red_flags:
+            for i, flag in enumerate(red_flags, 1):
+                severity = "🔴" if any(word in flag.lower() for word in ["urgent", "immediate", "suspend", "verify"]) else "🟡"
+                st.markdown(f"{severity} **{i}.** {flag}")
+        else:
+            st.info("✅ No significant red flags detected - this appears to be a legitimate email")
     else:
-        st.info("✅ No significant red flags detected - this appears to be a legitimate email")
+        # New enhanced format with categorization
+        total_flags = red_flags_data.get("total_count", 0)
+        categorized = red_flags_data.get("categorized", {})
+        
+        if total_flags > 0:
+            # Display flags by severity
+            severity_icons = {"critical": "🔴", "major": "🟠", "minor": "🟡", "unknown": "⚪"}
+            
+            for severity in ["critical", "major", "minor", "unknown"]:
+                flags = categorized.get(severity, [])
+                if flags:
+                    st.markdown(f"**{severity_icons[severity]} {severity.title()} Indicators ({len(flags)}):**")
+                    for flag in flags:
+                        st.markdown(f"   • {flag.get('text', flag)} - *{flag.get('description', '')}*")
+            
+            # Summary
+            severity_summary = red_flags_data.get("severity_summary", {})
+            if severity_summary.get("critical_count", 0) > 0:
+                st.error(f"⚠️ **{severity_summary['critical_count']} critical security indicators detected**")
+        else:
+            st.info("✅ No significant red flags detected - this appears to be a legitimate email")
     
     # Analysis summary
     reasoning = results.get("reasoning", "")
@@ -561,34 +583,68 @@ def display_results(results: Dict):
             st.markdown(f"**Email Length:** {results.get('email_length', 0):,} characters")
         with col_tech2:
             st.markdown(f"**Analysis Version:** {results.get('analysis_version', 'Unknown')}")
-            st.markdown(f"**Red Flags Count:** {len(red_flags)}")
+            flag_count = red_flags_data.get('total_count', 0) if isinstance(red_flags_data, dict) else len(red_flags_data) if isinstance(red_flags_data, list) else 0
+            st.markdown(f"**Red Flags Count:** {flag_count}")
     
-    # Recommendations based on risk level
+    # Enhanced recommendations using new framework
     st.markdown("### 💡 Recommendations")
-    if risk_score >= 7:
-        st.error("""
-        **🚨 HIGH RISK - Do not interact with this email:**
-        - Do not click any links or download attachments
-        - Do not provide any personal information
-        - Report this email to your IT security team
-        - Delete the email after reporting
-        """)
-    elif risk_score >= 4:
-        st.warning("""
-        **⚠️ MEDIUM RISK - Exercise caution:**
-        - Verify the sender through alternative means
-        - Be suspicious of any urgent requests
-        - Check URLs carefully before clicking
-        - Contact the organization directly if unsure
-        """)
+    recommendation = results.get("recommendation", {})
+    
+    # Handle both new format (dict) and legacy format (string)
+    if isinstance(recommendation, dict) and recommendation:
+        action = recommendation.get("action", "caution")
+        message = recommendation.get("message", "")
+        details = recommendation.get("details", [])
+        
+        if action == "block":
+            st.error(f"**🚨 BLOCK**: {message}")
+            for detail in details:
+                st.markdown(f"   • {detail}")
+        elif action == "caution":
+            st.warning(f"**⚠️ CAUTION**: {message}")
+            for detail in details:
+                st.markdown(f"   • {detail}")
+        else:
+            st.success(f"**✅ SAFE**: {message}")
+            for detail in details:
+                st.markdown(f"   • {detail}")
+    elif isinstance(recommendation, str):
+        # Legacy string format - convert to appropriate display
+        if recommendation == "block":
+            st.error("**🚨 BLOCK**: This email appears to be high risk. Do not interact with it.")
+        elif recommendation == "caution":
+            st.warning("**⚠️ CAUTION**: This email shows some suspicious indicators. Exercise caution.")
+        else:  # "ignore" or other
+            st.success("**✅ SAFE**: This email appears to be legitimate.")
+    elif recommendation:
+        # Unknown format - display as-is with warning
+        st.warning(f"**⚠️ UNKNOWN FORMAT**: {recommendation}")
     else:
-        st.success("""
-        **✅ LOW RISK - Appears legitimate:**
-        - Email shows normal characteristics
-        - Standard security practices still apply
-        - Verify important requests independently
-        - Trust but verify approach recommended
-        """)
+        # Fallback to old recommendations if new format not available
+        if risk_score >= 7:
+            st.error("""
+            **🚨 HIGH RISK - Do not interact with this email:**
+            - Do not click any links or download attachments
+            - Do not provide any personal information
+            - Report this email to your IT security team
+            - Delete the email after reporting
+            """)
+        elif risk_score >= 4:
+            st.warning("""
+            **⚠️ MEDIUM RISK - Exercise caution:**
+            - Verify the sender through alternative means
+            - Be suspicious of any urgent requests
+            - Check URLs carefully before clicking
+            - Contact the organization directly if unsure
+            """)
+        else:
+            st.success("""
+            **✅ LOW RISK - Appears legitimate:**
+            - Email shows normal characteristics
+            - Standard security practices still apply
+            - Verify important requests independently
+            - Trust but verify approach recommended
+            """)
 
 
 def get_risk_level(score: int) -> str:
