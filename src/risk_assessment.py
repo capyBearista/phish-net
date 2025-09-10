@@ -317,7 +317,7 @@ class RiskAssessment:
         # Cross-validate with heuristics
         heuristic_validation = self.cross_validate_with_heuristics(validated_score, email_metadata)
         
-        # Generate final report
+        # Generate final report (preserving success field and other metadata from LLM analysis)
         report = {
             # Enhanced core analysis
             "risk_score": validated_score,
@@ -352,6 +352,11 @@ class RiskAssessment:
             # Original LLM data (preserved)
             "llm_analysis": llm_analysis
         }
+        
+        # Preserve important fields from original LLM analysis (like success, model_used, etc.)
+        for preserve_key in ["success", "model_used", "response_time", "timestamp", "raw_response_length"]:
+            if preserve_key in llm_analysis:
+                report[preserve_key] = llm_analysis[preserve_key]
         
         return report
     
