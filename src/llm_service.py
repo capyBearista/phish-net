@@ -14,8 +14,10 @@ from datetime import datetime
 # Handle both relative and absolute imports
 try:
     from .risk_assessment import RiskAssessment
+    from .error_handling import error_handler, handle_ollama_error, ErrorCategory, PhishNetError
 except ImportError:
     from risk_assessment import RiskAssessment
+    from error_handling import error_handler, handle_ollama_error, ErrorCategory, PhishNetError
 
 
 class OllamaService:
@@ -39,7 +41,15 @@ class OllamaService:
             # Test basic connection
             response = requests.get(f"{self.base_url}/api/tags", timeout=10)
             if response.status_code != 200:
-                return {"connected": False, "error": f"HTTP {response.status_code}"}
+                error_info = handle_ollama_error(
+                    Exception(f"HTTP {response.status_code}"),
+                    f"Ollama server returned HTTP {response.status_code}"
+                )
+                return {
+                    "connected": False, 
+                    "error": f"HTTP {response.status_code}",
+                    "error_details": error_info
+                }
             
             # Check if our model is available
             models = response.json().get("models", [])
@@ -47,15 +57,41 @@ class OllamaService:
             
             model_available = any(self.model in name for name in model_names)
             
+            # Warn if model not available
+            if not model_available and model_names:
+                error_handler.logger.warning(
+                    f"Model '{self.model}' not found. Available: {', '.join(model_names[:3])}"
+                )
+            
             return {
                 "connected": True,
                 "model_available": model_available,
                 "available_models": model_names,
-                "ollama_version": response.headers.get("server", "unknown")
+                "ollama_version": response.headers.get("server", "unknown"),
+                "health_status": "healthy" if model_available else "degraded"
             }
             
-        except requests.exceptions.RequestException as e:
-            return {"connected": False, "error": str(e)}
+        except requests.exceptions.ConnectionError as e:
+            error_info = handle_ollama_error(e, "Cannot connect to Ollama service")
+            return {
+                "connected": False, 
+                "error": "Connection refused", 
+                "error_details": error_info
+            }
+        except requests.exceptions.Timeout as e:
+            error_info = error_handler.handle_error(e, "Ollama connection timeout", ErrorCategory.NETWORK_TIMEOUT)
+            return {
+                "connected": False, 
+                "error": "Connection timeout", 
+                "error_details": error_info
+            }
+        except Exception as e:
+            error_info = handle_ollama_error(e, "Unexpected error during connection test")
+            return {
+                "connected": False, 
+                "error": str(e), 
+                "error_details": error_info
+            }
     
     def analyze_email(self, processed_email: Dict, advanced_settings: Optional[Dict] = None) -> Dict:
         """
@@ -119,17 +155,37 @@ class OllamaService:
                     if attempt == self.max_retries - 1:
                         return self._create_error_response(error_msg)
             
-            except requests.exceptions.Timeout:
+            except requests.exceptions.Timeout as e:
                 if attempt == self.max_retries - 1:
-                    return self._create_error_response("Request timeout - model may be busy")
+                    error_info = error_handler.handle_error(
+                        e, f"LLM request timeout after {attempt + 1} attempts", 
+                        ErrorCategory.NETWORK_TIMEOUT
+                    )
+                    return {**error_info, "analysis_failed": True}
                 time.sleep(2 ** attempt)  # Exponential backoff
+                
+            except requests.exceptions.ConnectionError as e:
+                if attempt == self.max_retries - 1:
+                    error_info = handle_ollama_error(e, "Cannot connect to Ollama during analysis")
+                    return {**error_info, "analysis_failed": True}
+                time.sleep(1)
                 
             except requests.exceptions.RequestException as e:
                 if attempt == self.max_retries - 1:
-                    return self._create_error_response(f"Network error: {str(e)}")
+                    error_info = error_handler.handle_error(
+                        e, f"Network error during LLM analysis", 
+                        ErrorCategory.NETWORK_TIMEOUT
+                    )
+                    return {**error_info, "analysis_failed": True}
                 time.sleep(1)
         
-        return self._create_error_response("Max retries exceeded")
+        # Max retries exceeded
+        error_info = error_handler.handle_error(
+            Exception("Max retries exceeded"),
+            f"Failed after {self.max_retries} attempts",
+            ErrorCategory.LLM_PROCESSING
+        )
+        return {**error_info, "analysis_failed": True}
     
     def _create_phishing_analysis_prompt(self, processed_email: Dict) -> str:
         """

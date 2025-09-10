@@ -12,9 +12,13 @@ from datetime import datetime
 try:
     from .email_processor import EmailProcessor
     from .llm_service import OllamaService
+    from .error_handling import error_handler, ErrorHandler, ErrorCategory, PhishNetError
+    from .risk_assessment import RiskAssessment
 except ImportError:
     from email_processor import EmailProcessor
     from llm_service import OllamaService
+    from error_handling import error_handler, ErrorHandler, ErrorCategory, PhishNetError
+    from risk_assessment import RiskAssessment
 
 # Page configuration
 st.set_page_config(
@@ -84,13 +88,38 @@ def main():
     with st.sidebar:
         st.header("⚙️ Configuration")
         
-        # Connection status indicator
-        connection_status = check_ollama_status()
-        if connection_status["connected"] and connection_status.get("model_available"):
-            st.markdown(f'<div class="status-indicator status-connected">✅ Ollama & Model Ready</div>', unsafe_allow_html=True)
-        elif connection_status["connected"]:
-            st.markdown(f'<div class="status-indicator status-testing">⚠️ Connected - Model Not Found</div>', unsafe_allow_html=True)
+        # System Health Check
+        health_status = error_handler.check_system_health()
+        overall_status = health_status.get("overall_status", "unknown")
+        
+        if overall_status == "healthy":
+            st.markdown('<div class="status-indicator status-connected">✅ System Healthy</div>', unsafe_allow_html=True)
+        elif overall_status == "degraded":
+            st.markdown('<div class="status-indicator status-testing">⚠️ System Degraded</div>', unsafe_allow_html=True)
         else:
+            st.markdown('<div class="status-indicator status-disconnected">❌ System Issues</div>', unsafe_allow_html=True)
+        
+        # Show detailed health info in expander
+        with st.expander("🏥 System Health Details"):
+            for check in health_status.get("checks", []):
+                st.markdown(check)
+            for warning in health_status.get("warnings", []):
+                st.markdown(warning)
+            for error in health_status.get("errors", []):
+                st.markdown(error)
+            
+            # Show error statistics if any errors occurred
+            error_stats = error_handler.get_error_statistics()
+            if error_stats.get("total_errors", 0) > 0:
+                st.markdown(f"**Total errors this session:** {error_stats['total_errors']}")
+                if error_stats.get("most_common_errors"):
+                    st.markdown("**Most common issues:**")
+                    for error_type, count in error_stats["most_common_errors"][:3]:
+                        st.markdown(f"• {error_type}: {count}")
+        
+        # Connection status indicator (legacy - keeping for compatibility)
+        connection_status = check_ollama_status()
+        if not connection_status["connected"]:
             st.markdown(f'<div class="status-indicator status-disconnected">❌ Ollama Disconnected</div>', unsafe_allow_html=True)
         
         ollama_url = st.text_input(
@@ -408,21 +437,37 @@ def analyze_email(email_content: str, ollama_url: str, model_name: str, processe
         
         llm_service = st.session_state.ollama_service
         
-        # Test connection
+        # Test connection with enhanced error handling
         connection_status = llm_service.test_connection()
         if not connection_status.get("connected"):
-            raise Exception(f"Cannot connect to Ollama: {connection_status.get('error', 'Unknown error')}")
+            error_details = connection_status.get("error_details", {})
+            if error_details:
+                progress_bar.progress(100)
+                status_text.text("❌ Connection failed")
+                return error_details
+            else:
+                # Fallback error handling for legacy responses
+                error_info = error_handler.handle_error(
+                    Exception(f"Cannot connect to Ollama: {connection_status.get('error', 'Unknown error')}"),
+                    "Ollama connection test failed",
+                    ErrorCategory.OLLAMA_CONNECTION
+                )
+                progress_bar.progress(100)
+                status_text.text("❌ Connection failed")
+                return error_info
         
         if not connection_status.get("model_available"):
-            # Fall back to heuristic analysis
+            # Warn about model availability but continue with heuristic fallback
             status_text.text("⚠️ Model not available - using heuristic analysis...")
             progress_bar.progress(50)
-            time.sleep(1)
+            
+            # Log warning but don't fail
+            error_handler.logger.warning(f"Model '{model_name}' not available, falling back to heuristic analysis")
             
             results = perform_fallback_analysis(email_content, processed_data)
             
         else:
-            # Step 3: LLM Analysis
+            # Step 3: LLM Analysis with comprehensive error handling
             status_text.text("🤖 Running AI analysis with phi4-mini-reasoning...")
             progress_bar.progress(40)
             
@@ -432,25 +477,50 @@ def analyze_email(email_content: str, ollama_url: str, model_name: str, processe
                 "max_tokens": st.session_state.get("max_tokens", 2000)
             }
             
-            # Perform LLM analysis
-            if processed_data:
+            # Perform LLM analysis with comprehensive error handling
+            try:
+                if not processed_data:
+                    raise PhishNetError("No processed email data available", ErrorCategory.PARSING_ERROR)
+                
                 llm_results = llm_service.analyze_email(processed_data, advanced_settings)
-            else:
-                raise Exception("No processed email data available")
-            
-            if llm_results.get("success"):
-                # Use the complete enhanced analysis from LLM service
-                results = llm_results.copy()
-                # Add any app-specific metadata
-                results.update({
-                    "email_length": len(email_content),
-                    "analysis_version": "2.0-llm-enhanced"
-                })
-            else:
-                # Fall back to heuristic analysis
-                status_text.text("⚠️ LLM analysis failed - using heuristic analysis...")
+                
+                if llm_results.get("success"):
+                    # Use the complete enhanced analysis from LLM service
+                    results = llm_results.copy()
+                    # Add any app-specific metadata
+                    results.update({
+                        "email_length": len(email_content),
+                        "analysis_version": "2.0-llm-enhanced"
+                    })
+                else:
+                    error_msg = llm_results.get("error", "Unknown LLM error")
+                    raise PhishNetError(f"LLM analysis failed: {error_msg}", ErrorCategory.LLM_PROCESSING)
+                    
+            except PhishNetError as e:
+                # Handle PhishNet specific errors with user guidance
+                error_info = error_handler.handle_error(e, "LLM Analysis", e.category)
+                
+                # Check if this is a recoverable error
+                if e.category in [ErrorCategory.LLM_PROCESSING, ErrorCategory.PARSING_ERROR]:
+                    # Fall back to heuristic analysis
+                    status_text.text("⚠️ LLM analysis failed - using heuristic analysis...")
+                    results = perform_fallback_analysis(email_content, processed_data)
+                    results["fallback_reason"] = str(e)
+                else:
+                    # Show error and return
+                    progress_bar.progress(100)
+                    status_text.text("❌ Analysis failed")
+                    display_error(error_info)
+                    return
+                    
+            except Exception as e:
+                # Handle unexpected errors
+                error_info = error_handler.handle_error(e, "LLM Analysis", ErrorCategory.LLM_PROCESSING)
+                
+                # Always fall back for unexpected errors
+                status_text.text("⚠️ Unexpected error - using heuristic analysis...")
                 results = perform_fallback_analysis(email_content, processed_data)
-                results["llm_error"] = llm_results.get("error", "Unknown LLM error")
+                results["fallback_reason"] = str(e)
         
         # Step 4: Finalize results
         status_text.text("📊 Finalizing analysis...")
@@ -494,8 +564,99 @@ def analyze_email(email_content: str, ollama_url: str, model_name: str, processe
             st.exception(e)
 
 
+def display_error(error_info: Dict):
+    """Display enhanced error information with troubleshooting guidance"""
+    
+    # Check if this is an enhanced error response
+    if error_info.get("error") and "title" in error_info:
+        title = error_info.get("title", "⚠️ An error occurred")
+        message = error_info.get("message", "")
+        suggestions = error_info.get("suggestions", [])
+        severity = error_info.get("severity", "medium")
+        color = error_info.get("color", "#ffc107")
+        troubleshooting_tips = error_info.get("troubleshooting_tips", [])
+        recovery_actions = error_info.get("recovery_actions", [])
+        
+        # Display main error message
+        if severity == "critical":
+            st.error(f"**{title}**\n\n{message}")
+        elif severity == "high":
+            st.error(f"**{title}**\n\n{message}")
+        elif severity == "medium":
+            st.warning(f"**{title}**\n\n{message}")
+        else:
+            st.info(f"**{title}**\n\n{message}")
+        
+        # Show suggestions in expandable section
+        if suggestions:
+            with st.expander("💡 Troubleshooting Steps"):
+                st.markdown("**Try these solutions:**")
+                for i, suggestion in enumerate(suggestions, 1):
+                    st.markdown(f"{i}. {suggestion}")
+        
+        # Show additional tips if available
+        if troubleshooting_tips:
+            with st.expander("🔧 Technical Information"):
+                for tip in troubleshooting_tips:
+                    st.markdown(f"ℹ️ {tip}")
+        
+        # Show recovery actions as buttons
+        if recovery_actions:
+            st.markdown("**Quick Actions:**")
+            col1, col2, col3 = st.columns(3)
+            for i, action in enumerate(recovery_actions[:3]):
+                col = [col1, col2, col3][i]
+                with col:
+                    if st.button(action.get("label", "Action"), key=f"action_{action.get('action', i)}"):
+                        handle_recovery_action(action.get("action"))
+    
+    else:
+        # Fallback for simple error messages
+        error_msg = error_info.get("error", "Unknown error occurred")
+        st.error(f"❌ **Error**: {error_msg}")
+        
+        if "connection" in error_msg.lower():
+            with st.expander("💡 Connection Help"):
+                st.markdown("""
+                **Common Solutions:**
+                1. Check if Ollama is running: `ollama --version`
+                2. Start Ollama service: `ollama serve`
+                3. Verify URL: http://localhost:11434
+                4. Check firewall settings
+                """)
+
+
+def handle_recovery_action(action: str):
+    """Handle recovery actions from error display"""
+    if action == "test_connection":
+        st.rerun()
+    elif action == "retry":
+        if "analysis_results" in st.session_state:
+            del st.session_state.analysis_results
+        st.rerun()
+    elif action == "fallback_heuristic":
+        st.session_state.force_heuristic = True
+        st.rerun()
+    elif action == "refresh_models":
+        if hasattr(st.session_state, 'ollama_service'):
+            del st.session_state.ollama_service
+        st.rerun()
+    elif action == "clear_input":
+        st.session_state.email_content = ""
+        st.rerun()
+    elif action == "show_help":
+        st.session_state.show_help = True
+        st.rerun()
+
+
 def display_results(results: Dict):
     """Display enhanced analysis results with Phase 4 risk assessment"""
+    
+    # Check if this is an error response
+    if results.get("error") or results.get("analysis_failed"):
+        display_error(results)
+        return
+    
     risk_score = results.get("risk_score", 0)
     risk_level = results.get("risk_level", get_risk_level(risk_score))
     risk_color = results.get("risk_color", get_risk_color(risk_score))
