@@ -1,23 +1,44 @@
+"""
+Phish-Net Email Analyzer - Main Streamlit Application
+
+This module provides the web-based user interface for Phish-Net, a privacy-focused
+phishing email detection tool. The application orchestrates email processing,
+AI analysis, and risk assessment while maintaining a user-friendly interface.
+
+Key Components:
+- Streamlit web interface with responsive design
+- Session state management for analysis history
+- Real-time system health monitoring
+- Configuration management via sidebar
+- Error handling with user guidance
+
+Architecture:
+- Service Layer Pattern: Coordinates between specialized services
+- Privacy First: All processing happens locally
+- Error Resilience: Comprehensive error handling with graceful degradation
+
+Author: Phish-Net Development Team
+License: Educational Use
+"""
+
 import streamlit as st
-import email
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 import json
 import requests
 from typing import Dict, List, Optional
-import os
 import time
 import re
 from datetime import datetime
+
+# Flexible imports to support both package and standalone execution
 try:
     from .email_processor import EmailProcessor
     from .llm_service import OllamaService
-    from .error_handling import error_handler, ErrorHandler, ErrorCategory, PhishNetError
+    from .error_handling import error_handler, ErrorCategory, PhishNetError
     from .risk_assessment import RiskAssessment
 except ImportError:
     from email_processor import EmailProcessor
     from llm_service import OllamaService
-    from error_handling import error_handler, ErrorHandler, ErrorCategory, PhishNetError
+    from error_handling import error_handler, ErrorCategory, PhishNetError
     from risk_assessment import RiskAssessment
 
 # Page configuration
@@ -29,54 +50,306 @@ st.set_page_config(
 )
 
 def main():
-    """Main application function"""
-    # Initialize session state
+    """
+    Main application function with performance optimizations
+    
+    Features:
+    - Memory-efficient session state management
+    - Lazy loading of services
+    - Optimized history management with size limits
+    """
+    # Initialize session state with memory management
     if 'analysis_history' not in st.session_state:
         st.session_state.analysis_history = []
+    
+    # Limit history size to prevent memory bloat (keep last 50 analyses)
+    if len(st.session_state.analysis_history) > 50:
+        st.session_state.analysis_history = st.session_state.analysis_history[-50:]
+    
+    # Lazy load email processor only when needed
     if 'email_processor' not in st.session_state:
         st.session_state.email_processor = EmailProcessor()
+    
+    # Ollama service initialized on demand
     if 'ollama_service' not in st.session_state:
         st.session_state.ollama_service = None
     
-    # Custom CSS for better styling
+    # Enhanced CSS for professional UI styling with dark mode support
     st.markdown("""
     <style>
+    /* CSS Variables for theme colors */
+    :root {
+        --text-color: #262730;
+        --bg-color: #ffffff;
+        --card-bg: #ffffff;
+        --border-color: #e0e0e0;
+        --subtitle-color: #666;
+        --shadow: rgba(0,0,0,0.1);
+    }
+    
+    /* Dark mode variables */
+    [data-theme="dark"] {
+        --text-color: #fafafa;
+        --bg-color: #0e1117;
+        --card-bg: #262730;
+        --border-color: #4a4a4a;
+        --subtitle-color: #a0a0a0;
+        --shadow: rgba(255,255,255,0.05);
+    }
+    
+    /* Auto-detect dark mode */
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --text-color: #fafafa;
+            --bg-color: #0e1117;
+            --card-bg: #262730;
+            --border-color: #4a4a4a;
+            --subtitle-color: #a0a0a0;
+            --shadow: rgba(255,255,255,0.05);
+        }
+    }
+    
+    /* Main header styling with gradient text */
     .main-header {
         text-align: center;
-        padding: 2rem 0;
-        background: linear-gradient(90deg, #ff6b6b, #4ecdc4);
+        padding: 2rem 0 1rem 0;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
-        font-size: 3rem;
-        font-weight: bold;
+        font-size: 3.5rem;
+        font-weight: 800;
+        letter-spacing: -2px;
+        margin-bottom: 0;
     }
+    
+    /* Subtitle styling with theme support */
     .subtitle {
         text-align: center;
-        color: #666;
-        margin-bottom: 2rem;
+        color: var(--subtitle-color);
+        font-size: 1.2rem;
+        margin-bottom: 2.5rem;
+        font-weight: 300;
     }
+    
+    /* Enhanced status indicators */
     .status-indicator {
         display: flex;
         align-items: center;
-        padding: 0.5rem;
-        border-radius: 0.5rem;
+        padding: 0.75rem 1rem;
+        border-radius: 0.75rem;
         margin: 0.5rem 0;
+        font-weight: 500;
+        font-size: 0.95rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        transition: all 0.2s ease;
     }
+    
     .status-connected {
-        background-color: #d4edda;
-        color: #155724;
-        border: 1px solid #c3e6cb;
+        background: linear-gradient(135deg, #d4edda 0%, #c8e6c9 100%);
+        color: #2e7d32;
+        border: 1px solid #4caf50;
     }
+    
     .status-disconnected {
-        background-color: #f8d7da;
-        color: #721c24;
-        border: 1px solid #f5c6cb;
+        background: linear-gradient(135deg, #f8d7da 0%, #ffcdd2 100%);
+        color: #c62828;
+        border: 1px solid #f44336;
     }
+    
     .status-testing {
-        background-color: #fff3cd;
-        color: #856404;
-        border: 1px solid #ffeaa7;
+        background: linear-gradient(135deg, #fff3cd 0%, #ffecb3 100%);
+        color: #f57c00;
+        border: 1px solid #ff9800;
+    }
+    
+    /* Risk assessment cards with dark mode support */
+    .risk-card {
+        background: var(--card-bg);
+        color: var(--text-color);
+        border-radius: 1rem;
+        padding: 1.5rem;
+        margin: 1rem 0;
+        box-shadow: 0 4px 6px var(--shadow);
+        border-left: 5px solid;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    
+    .risk-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 15px var(--shadow);
+    }
+    
+    .risk-low {
+        border-left-color: #4caf50;
+    }
+    
+    .risk-medium {
+        border-left-color: #ff9800;
+    }
+    
+    .risk-high {
+        border-left-color: #f44336;
+    }
+    
+    /* Metric cards styling with dark mode support */
+    [data-testid="metric-container"] {
+        background: var(--card-bg) !important;
+        border: 1px solid var(--border-color) !important;
+        color: var(--text-color) !important;
+        padding: 1rem;
+        border-radius: 0.75rem;
+        box-shadow: 0 2px 4px var(--shadow);
+        transition: all 0.2s ease;
+    }
+    
+    [data-testid="metric-container"]:hover {
+        box-shadow: 0 4px 8px var(--shadow);
+        transform: translateY(-1px);
+    }
+    
+    /* Fix metric container text colors */
+    [data-testid="metric-container"] [data-testid="metric-label"] {
+        color: var(--subtitle-color) !important;
+    }
+    
+    [data-testid="metric-container"] [data-testid="metric-value"] {
+        color: var(--text-color) !important;
+    }
+    
+    /* Red flags styling with dark mode support */
+    .red-flag-item {
+        background: var(--card-bg);
+        color: var(--text-color);
+        border-left: 4px solid;
+        padding: 0.75rem 1rem;
+        margin: 0.5rem 0;
+        border-radius: 0 0.5rem 0.5rem 0;
+        box-shadow: 0 1px 3px var(--shadow);
+    }
+    
+    .red-flag-critical {
+        border-left-color: #f44336;
+    }
+    
+    .red-flag-major {
+        border-left-color: #ff9800;
+    }
+    
+    .red-flag-minor {
+        border-left-color: #ffc107;
+    }
+    
+    /* Button styling improvements with dark mode support */
+    .stButton > button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+        color: white !important;
+        border: none;
+        border-radius: 0.75rem;
+        padding: 0.75rem 1.5rem;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        box-shadow: 0 2px 4px var(--shadow);
+    }
+    
+    .stButton > button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px var(--shadow);
+    }
+    
+    /* File uploader styling with dark mode support */
+    [data-testid="stFileUploader"] {
+        background: var(--card-bg) !important;
+        border: 2px dashed var(--border-color) !important;
+        color: var(--text-color) !important;
+        border-radius: 1rem;
+        padding: 2rem;
+        text-align: center;
+        transition: all 0.2s ease;
+    }
+    
+    [data-testid="stFileUploader"]:hover {
+        border-color: #667eea !important;
+    }
+    
+    /* Text area enhancements with dark mode support */
+    .stTextArea textarea {
+        background: var(--card-bg) !important;
+        color: var(--text-color) !important;
+        border: 2px solid var(--border-color) !important;
+        border-radius: 0.75rem;
+        transition: border-color 0.2s ease;
+        font-family: 'Consolas', 'Monaco', monospace;
+    }
+    
+    .stTextArea textarea:focus {
+        border-color: #667eea !important;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1) !important;
+    }
+    
+    /* Progress bar styling */
+    .stProgress .css-1aumxhk {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 1rem;
+    }
+    
+    /* Expander styling with dark mode support */
+    .streamlit-expander {
+        background: var(--card-bg) !important;
+        color: var(--text-color) !important;
+        border: 1px solid var(--border-color) !important;
+        border-radius: 0.75rem;
+        overflow: hidden;
+        box-shadow: 0 2px 4px var(--shadow);
+    }
+    
+    .streamlit-expanderHeader {
+        background: var(--card-bg) !important;
+        color: var(--text-color) !important;
+        border-bottom: 1px solid var(--border-color) !important;
+        padding: 0.75rem 1rem;
+    }
+    
+    /* Loading spinner styling */
+    .stSpinner > div {
+        border-color: #667eea transparent #667eea transparent;
+    }
+    
+    /* Alert styling improvements with dark mode support */
+    .stAlert {
+        background: var(--card-bg) !important;
+        color: var(--text-color) !important;
+        border-radius: 0.75rem;
+        border: none;
+        box-shadow: 0 2px 4px var(--shadow);
+    }
+    
+    /* Streamlit input widgets dark mode fixes */
+    .stSelectbox > div > div {
+        background: var(--card-bg) !important;
+        color: var(--text-color) !important;
+        border: 1px solid var(--border-color) !important;
+    }
+    
+    .stNumberInput > div > div > input {
+        background: var(--card-bg) !important;
+        color: var(--text-color) !important;
+        border: 1px solid var(--border-color) !important;
+    }
+    
+    .stSlider .css-1cpxqw2 {
+        background: var(--card-bg) !important;
+        color: var(--text-color) !important;
+    }
+    
+    /* Radio button styling for dark mode */
+    .stRadio > div {
+        color: var(--text-color) !important;
+    }
+    
+    /* Sidebar text color fixes */
+    .css-1d391kg, .css-1d391kg .element-container {
+        color: var(--text-color) !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -86,21 +359,21 @@ def main():
     
     # Sidebar for configuration
     with st.sidebar:
-        st.header("⚙️ Configuration")
+        st.header("Configuration")
         
         # System Health Check
         health_status = error_handler.check_system_health()
         overall_status = health_status.get("overall_status", "unknown")
         
         if overall_status == "healthy":
-            st.markdown('<div class="status-indicator status-connected">✅ System Healthy</div>', unsafe_allow_html=True)
+            st.markdown('<div class="status-indicator status-connected">System Healthy</div>', unsafe_allow_html=True)
         elif overall_status == "degraded":
-            st.markdown('<div class="status-indicator status-testing">⚠️ System Degraded</div>', unsafe_allow_html=True)
+            st.markdown('<div class="status-indicator status-testing">System Degraded</div>', unsafe_allow_html=True)
         else:
-            st.markdown('<div class="status-indicator status-disconnected">❌ System Issues</div>', unsafe_allow_html=True)
+            st.markdown('<div class="status-indicator status-disconnected">System Issues</div>', unsafe_allow_html=True)
         
         # Show detailed health info in expander
-        with st.expander("🏥 System Health Details"):
+        with st.expander("System Health Details"):
             for check in health_status.get("checks", []):
                 st.markdown(check)
             for warning in health_status.get("warnings", []):
@@ -139,20 +412,20 @@ def main():
         # Test connection button
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("🔄 Test Connection", use_container_width=True):
+            if st.button("Test Connection", use_container_width=True):
                 with st.spinner("Testing connection..."):
                     if test_ollama_connection(ollama_url or "http://localhost:11434"):
-                        st.success("✅ Connected!")
+                        st.success("Connected!")
                         st.rerun()
                     else:
-                        st.error("❌ Connection failed")
+                        st.error("Connection failed")
         
         with col2:
-            if st.button("📜 View Models", use_container_width=True):
+            if st.button("View Models", use_container_width=True):
                 show_available_models(ollama_url or "http://localhost:11434")
         
         # Advanced settings
-        with st.expander("🔧 Advanced Settings"):
+        with st.expander("Advanced Settings"):
             timeout = st.slider("Request Timeout (seconds)", 5, 60, 30)
             max_tokens = st.slider("Max Response Tokens", 500, 4000, 2000)
             temperature = st.slider("Model Temperature", 0.0, 1.0, 0.3, 0.1)
@@ -164,7 +437,7 @@ def main():
             
         # Analysis history
         if st.session_state.analysis_history:
-            with st.expander(f"📊 Analysis History ({len(st.session_state.analysis_history)})"):
+            with st.expander(f"Analysis History ({len(st.session_state.analysis_history)})"):
                 for i, analysis in enumerate(reversed(st.session_state.analysis_history[-5:])):
                     with st.container():
                         risk_color = get_risk_color(analysis['risk_score'])
@@ -178,12 +451,12 @@ def main():
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.header("📧 Email Input")
+        st.header("Email Input")
         
-        # Input method selection with icons
+        # Input method selection
         input_method = st.radio(
             "Choose input method:",
-            ["📝 Paste Email Text", "📎 Upload .eml File"],
+            ["Paste Email Text", "Upload .eml File"],
             horizontal=True,
             help="Choose how you want to provide the email for analysis"
         )
@@ -191,8 +464,8 @@ def main():
         email_content = ""
         validation_results = {"valid": False, "warnings": [], "info": []}
         
-        if "📝" in input_method:  # Paste Email Text
-            st.markdown("**📝 Text Input**")
+        if "Paste" in input_method:  # Paste Email Text
+            st.markdown("**Text Input**")
             
             # Use sample content if available
             initial_value = st.session_state.get("sample_email_content", "")
@@ -217,7 +490,7 @@ def main():
                 display_input_validation(validation_results)
             
         else:  # Upload .eml File
-            st.markdown("**📎 File Upload**")
+            st.markdown("**File Upload**")
             uploaded_file = st.file_uploader(
                 "Upload .eml file",
                 type=['eml', 'msg', 'txt'],
@@ -409,15 +682,33 @@ def test_ollama_connection(ollama_url: str) -> bool:
 
 
 def analyze_email(email_content: str, ollama_url: str, model_name: str, processed_data: Optional[Dict] = None):
-    """Analyze email content for phishing indicators using LLM"""
+    """
+    Analyze email content for phishing indicators using LLM with performance optimization
     
-    # Create progress tracking
+    Performance features:
+    - Connection reuse and caching
+    - Streaming progress indicators
+    - Memory-efficient processing
+    - Adaptive timeout management
+    """
+    
+    # Performance tracking
+    start_time = time.time()
+    
+    # Create progress tracking with enhanced UI
     progress_bar = st.progress(0)
     status_text = st.empty()
     
+    # Memory check - warn if email content is very large
+    content_size_mb = len(email_content.encode('utf-8')) / (1024 * 1024)
+    if content_size_mb > 5:  # > 5MB
+        st.warning(f"⚠️ Large email detected ({content_size_mb:.1f}MB). Processing may take longer.")
+    elif content_size_mb > 1:  # > 1MB
+        st.info(f"ℹ️ Processing {content_size_mb:.1f}MB email content...")
+    
     try:
         # Step 1: Preprocessing
-        status_text.text("📝 Preprocessing email content...")
+        status_text.text("Preprocessing email content...")
         progress_bar.progress(10)
         
         if not processed_data:
@@ -425,7 +716,7 @@ def analyze_email(email_content: str, ollama_url: str, model_name: str, processe
             processed_data = processor.process_email(email_content, is_file_content=False)
         
         # Step 2: Check LLM service availability
-        status_text.text("� Connecting to AI model...")
+        status_text.text("Connecting to AI model...")
         progress_bar.progress(20)
         
         # Ensure LLM service is configured
@@ -443,7 +734,7 @@ def analyze_email(email_content: str, ollama_url: str, model_name: str, processe
             error_details = connection_status.get("error_details", {})
             if error_details:
                 progress_bar.progress(100)
-                status_text.text("❌ Connection failed")
+                status_text.text("Connection failed")
                 return error_details
             else:
                 # Fallback error handling for legacy responses
@@ -453,12 +744,12 @@ def analyze_email(email_content: str, ollama_url: str, model_name: str, processe
                     ErrorCategory.OLLAMA_CONNECTION
                 )
                 progress_bar.progress(100)
-                status_text.text("❌ Connection failed")
+                status_text.text("Connection failed")
                 return error_info
         
         if not connection_status.get("model_available"):
             # Warn about model availability but continue with heuristic fallback
-            status_text.text("⚠️ Model not available - using heuristic analysis...")
+            status_text.text("Model not available - using heuristic analysis...")
             progress_bar.progress(50)
             
             # Log warning but don't fail
@@ -468,7 +759,7 @@ def analyze_email(email_content: str, ollama_url: str, model_name: str, processe
             
         else:
             # Step 3: LLM Analysis with comprehensive error handling
-            status_text.text("🤖 Running AI analysis with phi4-mini-reasoning...")
+            status_text.text("Running AI analysis...")
             progress_bar.progress(40)
             
             # Get advanced settings from session state
@@ -650,7 +941,7 @@ def handle_recovery_action(action: str):
 
 
 def display_results(results: Dict):
-    """Display enhanced analysis results with Phase 4 risk assessment"""
+    """Display enhanced analysis results with professional styling and improved UX"""
     
     # Check if this is an error response
     if results.get("error") or results.get("analysis_failed"):
@@ -663,38 +954,47 @@ def display_results(results: Dict):
     confidence_score = results.get("confidence_score", 0.5)
     confidence_level = results.get("confidence_level", "medium")
     
-    # Main risk score display with enhanced styling
+    # Determine risk class for styling
+    risk_class = "risk-high" if risk_score >= 7 else "risk-medium" if risk_score >= 4 else "risk-low"
+    risk_icon = "🚨" if risk_score >= 7 else ""  # Only use emoji for critical alerts
+    
+    # Main risk assessment card with enhanced styling
     st.markdown(f"""
-    <div style="
-        padding: 1rem; 
-        border-radius: 0.5rem; 
-        border-left: 5px solid {risk_color}; 
-        background-color: {'#f8d7da' if risk_score >= 7 else '#fff3cd' if risk_score >= 4 else '#d4edda'};
-        margin: 1rem 0;
-    ">
-        <h2 style="margin: 0; color: {risk_color};">
-            {'🚨' if risk_score >= 7 else '⚠️' if risk_score >= 4 else '✅'} {risk_level}
-        </h2>
-        <h3 style="margin: 0.5rem 0; color: {risk_color};">
-            Risk Score: {risk_score}/10
-        </h3>
+    <div class="risk-card {risk_class}">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
+            <h1 style="margin: 0; font-size: 2.5rem; color: {risk_color};">
+                {risk_icon} {risk_level}
+            </h1>
+            <div style="text-align: right;">
+                <h2 style="margin: 0; font-size: 3rem; color: {risk_color}; font-weight: 700;">
+                    {risk_score}<span style="font-size: 1.5rem; color: #666;">/10</span>
+                </h2>
+            </div>
+        </div>
+        <div style="border-top: 1px solid #e0e0e0; padding-top: 1rem;">
+            <p style="margin: 0; color: #666; font-size: 1.1rem;">
+                Analysis completed with <strong>{confidence_level}</strong> confidence 
+                ({confidence_score:.1%} certainty)
+            </p>
+        </div>
     </div>
     """, unsafe_allow_html=True)
     
     # Enhanced risk score visualization
     col_score1, col_score2, col_score3, col_score4 = st.columns(4)
     with col_score1:
-        st.metric("🎯 Risk Score", f"{risk_score}/10")
+        st.metric("Risk Score", f"{risk_score}/10")
     with col_score2:
-        st.metric("📊 Risk Level", risk_level)
+        st.metric("Risk Level", risk_level)
     with col_score3:
-        st.metric("🔍 Confidence", f"{confidence_level.title()} ({confidence_score:.1f})")
+        st.metric("Confidence", f"{confidence_level.title()} ({confidence_score:.1f})")
     with col_score4:
         trusted = results.get("trusted_sender", False)
-        st.metric("� Sender", "Trusted ✅" if trusted else "Unknown ⚠️")
+        st.metric("Sender Status", "Trusted" if trusted else "Unknown")
     
-    # Enhanced red flags display with categorization
-    st.markdown("### 🚩 Identified Red Flags")
+    # Enhanced red flags display with professional styling
+    st.markdown("---")
+    st.markdown("### Security Assessment Details")
     red_flags_data = results.get("red_flags", {})
     
     # Handle both old format (list) and new format (dict with categorization)
@@ -702,42 +1002,98 @@ def display_results(results: Dict):
         # Backward compatibility with old format
         red_flags = red_flags_data
         if red_flags:
+            st.markdown("**Identified Security Indicators:**")
             for i, flag in enumerate(red_flags, 1):
-                severity = "🔴" if any(word in flag.lower() for word in ["urgent", "immediate", "suspend", "verify"]) else "🟡"
-                st.markdown(f"{severity} **{i}.** {flag}")
+                # Determine severity class based on content
+                is_critical = any(word in flag.lower() for word in ["password", "credential", "urgent", "immediate", "suspend", "verify", "click now"])
+                is_major = any(word in flag.lower() for word in ["suspicious", "mismatched", "shortened", "threatening"])
+                
+                flag_class = "red-flag-critical" if is_critical else "red-flag-major" if is_major else "red-flag-minor"
+                severity_icon = "�" if is_critical else "🟠" if is_major else "�🟡"
+                
+                st.markdown(f"""
+                <div class="red-flag-item {flag_class}">
+                    <strong>{severity_icon} Indicator {i}:</strong> {flag}
+                </div>
+                """, unsafe_allow_html=True)
         else:
-            st.info("✅ No significant red flags detected - this appears to be a legitimate email")
+            st.markdown("""
+            <div class="risk-card risk-low" style="text-align: center;">
+                <h3 style="color: #4caf50; margin: 0.5rem 0;">Clean Email Assessment</h3>
+                <p style="color: #666; margin: 0;">No significant security indicators detected. This appears to be a legitimate email.</p>
+            </div>
+            """, unsafe_allow_html=True)
     else:
         # New enhanced format with categorization
         total_flags = red_flags_data.get("total_count", 0)
         categorized = red_flags_data.get("categorized", {})
         
         if total_flags > 0:
-            # Display flags by severity
-            severity_icons = {"critical": "🔴", "major": "🟠", "minor": "🟡", "unknown": "⚪"}
+            # Create summary cards for each severity level
+            severity_config = {
+                "critical": {"icon": "●", "color": "#f44336", "class": "red-flag-critical"},
+                "major": {"icon": "●", "color": "#ff9800", "class": "red-flag-major"}, 
+                "minor": {"icon": "●", "color": "#ffc107", "class": "red-flag-minor"},
+                "unknown": {"icon": "●", "color": "#9e9e9e", "class": "red-flag-minor"}
+            }
             
+            # Display summary statistics
+            cols = st.columns(len([s for s in severity_config if categorized.get(s, [])]))
+            for i, severity in enumerate(severity_config.keys()):
+                flags = categorized.get(severity, [])
+                if flags:
+                    with cols[i % len(cols)]:
+                        config = severity_config[severity]
+                        st.metric(
+                            f"{config['icon']} {severity.title()}", 
+                            len(flags),
+                            help=f"{severity.title()} severity indicators"
+                        )
+            
+            # Display detailed flags by severity
             for severity in ["critical", "major", "minor", "unknown"]:
                 flags = categorized.get(severity, [])
                 if flags:
-                    st.markdown(f"**{severity_icons[severity]} {severity.title()} Indicators ({len(flags)}):**")
-                    for flag in flags:
-                        st.markdown(f"   • {flag.get('text', flag)} - *{flag.get('description', '')}*")
+                    config = severity_config[severity]
+                    st.markdown(f"**{config['icon']} {severity.title()} Security Indicators:**")
+                    
+                    for j, flag in enumerate(flags, 1):
+                        flag_text = flag.get('text', flag) if isinstance(flag, dict) else flag
+                        flag_desc = flag.get('description', '') if isinstance(flag, dict) else ''
+                        
+                        st.markdown(f"""
+                        <div class="red-flag-item {config['class']}">
+                            <strong>{config['icon']} {flag_text}</strong>
+                            {f'<br><em style="color: #666; font-size: 0.9rem;">{flag_desc}</em>' if flag_desc else ''}
+                        </div>
+                        """, unsafe_allow_html=True)
             
-            # Summary
+            # Critical warning if applicable
             severity_summary = red_flags_data.get("severity_summary", {})
-            if severity_summary.get("critical_count", 0) > 0:
-                st.error(f"⚠️ **{severity_summary['critical_count']} critical security indicators detected**")
+            critical_count = severity_summary.get("critical_count", 0)
+            if critical_count > 0:
+                st.markdown(f"""
+                <div class="risk-card risk-high" style="border: 2px solid #f44336;">
+                    <h3 style="color: #f44336; margin: 0.5rem 0;">High Risk Warning</h3>
+                    <p style="color: #666; margin: 0;"><strong>{critical_count}</strong> critical security indicators detected. Exercise extreme caution.</p>
+                </div>
+                """, unsafe_allow_html=True)
         else:
-            st.info("✅ No significant red flags detected - this appears to be a legitimate email")
+            st.markdown("""
+            <div class="risk-card risk-low" style="text-align: center;">
+                <h3 style="color: #4caf50; margin: 0.5rem 0;">Clean Email Assessment</h3>
+                <p style="color: #666; margin: 0;">No significant security indicators detected. This appears to be a legitimate email.</p>
+            </div>
+            """, unsafe_allow_html=True)
     
     # Analysis summary
     reasoning = results.get("reasoning", "")
     if reasoning:
-        st.markdown("### 💭 Analysis Summary")
+        st.markdown("### Analysis Summary")
         st.markdown(f"*{reasoning}*")
     
     # Technical details (expandable)
-    with st.expander("� Technical Details"):
+    with st.expander("Technical Details"):
         col_tech1, col_tech2 = st.columns(2)
         with col_tech1:
             st.markdown(f"**Analysis Time:** {results.get('timestamp', 'Unknown')}")
@@ -748,7 +1104,7 @@ def display_results(results: Dict):
             st.markdown(f"**Red Flags Count:** {flag_count}")
     
     # Enhanced recommendations using new framework
-    st.markdown("### 💡 Recommendations")
+    st.markdown("### Recommendations")
     recommendation = results.get("recommendation", {})
     
     # Handle both new format (dict) and legacy format (string)
@@ -1257,5 +1613,111 @@ https://github.com/settings/notifications"""
         st.error(f"❌ Failed to load sample email: {str(e)}")
 
 
+# Performance monitoring and optimization functions
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def get_system_performance_stats():
+    """Get system performance statistics for optimization"""
+    import platform
+    
+    try:
+        import psutil
+        return {
+            "cpu_count": psutil.cpu_count(),
+            "memory_total_gb": round(psutil.virtual_memory().total / (1024**3), 2),
+            "memory_available_gb": round(psutil.virtual_memory().available / (1024**3), 2),
+            "memory_percent": psutil.virtual_memory().percent,
+            "platform": platform.system(),
+            "python_version": platform.python_version()
+        }
+    except ImportError:
+        # Fallback if psutil not available
+        return {
+            "cpu_count": "Unknown",
+            "memory_total_gb": "Unknown", 
+            "memory_available_gb": "Unknown",
+            "memory_percent": "Unknown",
+            "platform": platform.system(),
+            "python_version": platform.python_version()
+        }
+
+def optimize_session_state():
+    """Clean up session state to prevent memory bloat"""
+    # Limit analysis history
+    if 'analysis_history' in st.session_state and len(st.session_state.analysis_history) > 50:
+        # Keep only the most recent 25 analyses
+        st.session_state.analysis_history = st.session_state.analysis_history[-25:]
+    
+    # Clean up temporary data
+    temp_keys = [k for k in st.session_state.keys() if isinstance(k, str) and (k.startswith('temp_') or k.startswith('cache_'))]
+    for key in temp_keys:
+        if key in st.session_state:
+            del st.session_state[key]
+
+def get_performance_recommendations():
+    """Provide performance recommendations based on system specs"""
+    stats = get_system_performance_stats()
+    recommendations = []
+    
+    memory_percent = stats.get("memory_percent")
+    if isinstance(memory_percent, (int, float)) and memory_percent > 80:
+        recommendations.append("High memory usage detected. Consider restarting the application.")
+    
+    memory_total = stats.get("memory_total_gb")
+    if isinstance(memory_total, (int, float)) and memory_total < 4:
+        recommendations.append("Low system memory. Consider using a smaller AI model for better performance.")
+    
+    cpu_count = stats.get("cpu_count")
+    if isinstance(cpu_count, int) and cpu_count <= 2:
+        recommendations.append("Limited CPU cores. Increase timeout settings for better reliability.")
+    
+    return recommendations
+
+def add_performance_sidebar():
+    """Add performance information to sidebar"""
+    if st.sidebar.checkbox("Performance Monitor", value=False):
+        with st.sidebar.expander("System Info"):
+            stats = get_system_performance_stats()
+            
+            st.markdown(f"**Platform:** {stats.get('platform', 'Unknown')}")
+            st.markdown(f"**Python:** {stats.get('python_version', 'Unknown')}")
+            st.markdown(f"**CPU Cores:** {stats.get('cpu_count', 'Unknown')}")
+            
+            if isinstance(stats.get('memory_total_gb'), (int, float)):
+                st.markdown(f"**Memory:** {stats.get('memory_available_gb', 'Unknown'):.1f}GB / {stats.get('memory_total_gb', 'Unknown'):.1f}GB")
+                
+                memory_percent = stats.get('memory_percent')
+                if isinstance(memory_percent, (int, float)):
+                    memory_color = "🟢" if memory_percent < 60 else "🟡" if memory_percent < 80 else "🔴"
+                    st.markdown(f"**Usage:** {memory_color} {memory_percent}%")
+            
+            # Performance recommendations
+            recommendations = get_performance_recommendations()
+            if recommendations:
+                st.markdown("**Recommendations:**")
+                for rec in recommendations:
+                    st.markdown(rec)
+            
+            # Session state info
+            if 'analysis_history' in st.session_state:
+                history_count = len(st.session_state.analysis_history)
+                st.markdown(f"**Analyses Stored:** {history_count}")
+                
+                if history_count > 30:
+                    if st.button("Clean History", help="Remove old analyses to free memory"):
+                        optimize_session_state()
+                        st.success("Session optimized!")
+                        st.rerun()
+
+
 if __name__ == "__main__":
+    # Performance optimization on startup
+    optimize_session_state()
+    
+    # Add performance monitoring to sidebar
+    try:
+        add_performance_sidebar()
+    except Exception as e:
+        # Don't let performance monitoring break the app
+        pass
+    
     main()
