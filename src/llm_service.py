@@ -227,13 +227,13 @@ class OllamaService:
         trust_info = f"\nSENDER ANALYSIS:\nDomain: {sender_domain}\nTrusted Domain: {'YES' if sender_trusted else 'NO'}"
         
         prompt = f"""<analysis>
-You are a cybersecurity expert analyzing an email for phishing indicators. 
+You are a cybersecurity expert analyzing an email for phishing indicators.
 
 CRITICAL INSTRUCTIONS:
-1. Distinguish between legitimate notifications and phishing attempts
-2. Consider the sender's legitimacy and domain reputation
+1. Focus ONLY on actual phishing indicators, not unfamiliar domains
+2. Corporate and business domains (.com, .org) are typically LEGITIMATE
 3. Output ONLY valid JSON in the exact format specified below
-4. Security notifications from legitimate services are typically LOW RISK
+4. Look for clear malicious intent, not just unknown senders
 
 EMAIL TO ANALYZE:
 ==================
@@ -249,28 +249,62 @@ Body:
 
 ANALYSIS FRAMEWORK:
 ==================
-PRIMARY RULE: If "Trusted Domain: YES", this is likely LEGITIMATE (Risk 1-3) unless clear phishing indicators exist.
+LEGITIMATE EMAIL TYPES (LOW RISK 1-3):
+- Corporate newsletters, meeting invitations, company communications
+- Professional business communications from .com/.org domains
+- Emails with consistent branding and professional language
+- Service notifications from established companies (GitHub, Microsoft, etc.)
+- Internal communications between colleagues
+- Legitimate business domains (even if not widely known)
+- Personal emails between friends/colleagues without suspicious elements
+- Brief/short emails that don't contain phishing indicators
+- Password reset confirmations from legitimate services
+- Professional emails with proper signatures and contact info
 
-LEGITIMATE INDICATORS (LOW RISK 1-3):
-- Sender from trusted domain (github.com, microsoft.com, google.com, paypal.com, etc.)
-- Security notifications with URLs matching sender domain
-- Professional language and consistent branding
-- URLs pointing to legitimate service domains matching the sender
-- Automated notification language ("Hi there", "Dear user")
+SUSPICIOUS EMAIL TYPES (MEDIUM RISK 4-6):
+- Unsolicited lottery/prize notifications from unknown organizations
+- Urgent account verification requests from unfamiliar services
+- Poor grammar or unprofessional formatting in business communications  
+- Generic greetings from services that should know your name ("Dear Customer")
+- Investment opportunities or "get rich quick" schemes
+- Requests for personal information without clear legitimate purpose
 
-PHISHING INDICATORS (MEDIUM/HIGH RISK 4-10):
-- Domain spoofing (e.g., githbub.com, microsft.com, paypaI.com)
-- Requests for passwords, credit card numbers, SSN, or personal information
-- Suspicious/shortened URLs or mismatched domains
-- Poor grammar, spelling errors, unprofessional formatting
-- Immediate threats of account closure with urgent action required
-- Generic greetings from services that should know your name
+NOTE: Company newsletters to employees, service notifications from known companies, and professional business communications are NOT suspicious.
 
-SPECIAL CONSIDERATIONS:
-- Security notifications from legitimate services are NORMAL and LOW RISK
-- Cautionary language in security alerts is EXPECTED, not threatening
-- URLs like "github.com/settings/security" are LEGITIMATE for GitHub emails
-- "Hi there" is STANDARD for automated notifications from legitimate services
+HIGH RISK PHISHING ATTEMPTS (RISK 7-10):
+- Clear domain spoofing (microsft.com, paypaI.com, amaz0n.com)
+- Direct requests for passwords, SSN, credit card numbers
+- URLs pointing to obviously malicious domains (.ru, .tk, suspicious-domain.com)
+- Threats of immediate account closure with urgent action required
+- Credential harvesting forms or suspicious download links
+- Impersonation of banks/financial institutions with fake urgency
+
+DOMAIN ANALYSIS RULES:
+- company.com = LEGITIMATE corporate domain (not spoofing)
+- github.com = LEGITIMATE (established service)
+- microsoft.com = LEGITIMATE (established service)  
+- microsft.com = PHISHING (typo domain)
+- paypal.com = LEGITIMATE (established service)
+- paypaI.com = PHISHING (using capital i instead of l)
+- bankoamerica-verify.suspicious-domain.ru = PHISHING (clearly malicious)
+- service-center.com = SUSPICIOUS but not definitive phishing (could be legitimate business)
+- international-lottery.org = SUSPICIOUS (unsolicited lottery) but not high-risk phishing
+- example.com = TEST/PERSONAL domain (legitimate for testing/personal use)
+
+LEGITIMATE EMAIL EXAMPLES:
+- Company newsletter to employees about business updates = LOW RISK (1) - Internal business communication
+- Password reset confirmation from github.com = LOW RISK (1-2) - Legitimate service communication  
+- Meeting invitation from colleague at company.com = LOW RISK (1) - Internal business communication
+- Personal dinner plans between friends = LOW RISK (1) - Personal correspondence
+- Short "Hello" email without suspicious elements = LOW RISK (2) - Brief legitimate communication  
+- Service notification from established company = LOW RISK (2-3) - Legitimate business notification
+- Security notifications from known services (GitHub, Microsoft) = LOW RISK (1-2) - Legitimate security communication
+
+CRITICAL: Do NOT flag legitimate business communications as suspicious:
+- Company newsletters/updates to employees are LEGITIMATE
+- Password/security notifications from established services are LEGITIMATE  
+- Internal business communications are LEGITIMATE
+Only flag emails with ACTUAL phishing indicators like fake domains, credential harvesting, or threats.
 
 REQUIRED OUTPUT FORMAT (JSON ONLY):
 {{
@@ -280,14 +314,22 @@ REQUIRED OUTPUT FORMAT (JSON ONLY):
         "specific indicator 1",
         "specific indicator 2"
     ],
-    "reasoning": "Brief explanation of assessment focusing on key indicators found",
+    "reasoning": "Brief explanation focusing on actual phishing indicators found or absence thereof",
     "recommendation": "[ignore|caution|block]"
 }}
 
 SCORING GUIDELINES:
-- 1-3: Legitimate email with no significant concerns
-- 4-6: Suspicious elements present, exercise caution
-- 7-10: High risk phishing attempt, recommend blocking
+- 1-2: Clearly legitimate (established services, personal emails, professional business communications)
+- 3-4: Likely legitimate but with minor concerns (unfamiliar but professional senders)
+- 5-6: Suspicious elements present but not definitively malicious (unsolicited offers, generic urgency)
+- 7-8: Likely phishing with multiple suspicious indicators
+- 9-10: Definitive phishing attempt with clear malicious intent
+
+IMPORTANT: Only score 7+ when you see ACTUAL phishing indicators like:
+- Domain spoofing/typos (microsft.com vs microsoft.com)
+- Direct credential harvesting requests
+- Suspicious domains (.ru, .tk, clearly fake domains)
+- Obvious impersonation attempts
 
 Begin analysis now. Output only the JSON response:
 </analysis>"""
@@ -436,11 +478,13 @@ Begin analysis now. Output only the JSON response:
     
     def _align_score_with_recommendation(self, score: int, recommendation: str) -> int:
         """Ensure risk score aligns with recommendation"""
-        if recommendation == "ignore" and score > 4:
-            return 3
-        elif recommendation == "block" and score < 6:
-            return 7
-        return score
+        # Temporarily disabled to debug score inflation issues
+        # Only adjust if there's a clear mismatch
+        if recommendation == "ignore" and score > 6:
+            return 3  # Only adjust very high scores with ignore recommendation
+        elif recommendation == "block" and score < 4:
+            return 7  # Only adjust very low scores with block recommendation
+        return score  # Preserve LLM's score in most cases
     
     def _get_risk_level(self, score: int) -> str:
         """Convert score to risk level"""

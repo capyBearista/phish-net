@@ -236,11 +236,25 @@ class RiskAssessment:
         heuristic_flags = []
         heuristic_score = 1  # Start with low risk
         
-        # Check trusted sender
+        # Improved sender trust evaluation
         if metadata.get("sender_trusted", False):
-            heuristic_score = max(1, min(heuristic_score, 3))  # Cap at low risk
+            heuristic_score = max(1, min(heuristic_score, 2))  # Cap at very low risk for trusted senders
         else:
-            heuristic_score += 2  # Unknown sender increases risk
+            # Check if sender is from a legitimate-looking corporate domain
+            sender_domain = metadata.get("sender_domain", "").lower()
+            if self._is_legitimate_corporate_domain(sender_domain):
+                # Corporate domains don't increase risk, they're neutral
+                heuristic_flags.append("Legitimate corporate domain sender")
+            elif sender_domain.endswith(('.ru', '.tk', '.ml', '.ga', '.cf')):
+                # Suspicious TLDs get higher penalty
+                heuristic_score += 4
+                heuristic_flags.append("Suspicious domain TLD detected")
+            elif sender_domain in ['test.com', 'example.com', 'localhost', ''] or 'test' in sender_domain:
+                # Test/example domains are neutral, not suspicious
+                heuristic_flags.append("Test/example domain (neutral)")
+            else:
+                heuristic_score += 1  # Reduced penalty for unknown sender
+                heuristic_flags.append("Unknown sender domain")
         
         # Check URL analysis
         suspicious_urls = metadata.get("suspicious_url_count", 0)
@@ -263,6 +277,46 @@ class RiskAssessment:
             "agreement_level": agreement_level,
             "validation_notes": self._generate_validation_notes(llm_score, heuristic_score)
         }
+    
+    def _is_legitimate_corporate_domain(self, domain: str) -> bool:
+        """
+        Check if domain looks like a legitimate corporate domain.
+        
+        This provides a fallback for domains not in the trusted list but
+        that appear to be legitimate business domains.
+        """
+        if not domain:
+            return False
+        
+        # Common legitimate business TLDs
+        business_tlds = {'.com', '.org', '.net', '.edu', '.gov', '.mil'}
+        
+        # Check if domain ends with business TLD
+        has_business_tld = any(domain.endswith(tld) for tld in business_tlds)
+        if not has_business_tld:
+            return False
+        
+        # Known legitimate services (even with security-related names)
+        legitimate_services = {
+            'github.com', 'microsoft.com', 'google.com', 'apple.com',
+            'paypal.com', 'amazon.com', 'twitter.com', 'facebook.com',
+            'linkedin.com', 'dropbox.com', 'slack.com', 'zoom.us'
+        }
+        
+        if domain in legitimate_services:
+            return True
+        
+        # Exclude obvious suspicious patterns, but be more selective
+        suspicious_patterns = [
+            'verify-', '-verify', 'secure-', '-secure', 'login-', '-login',
+            'account-verify', 'security-alert', 'suspicious-domain'
+        ]
+        
+        # Only flag if domain contains obvious phishing patterns
+        has_phishing_patterns = any(pattern in domain for pattern in suspicious_patterns)
+        
+        # Legitimate if business TLD and no obvious phishing patterns
+        return has_business_tld and not has_phishing_patterns
     
     def _generate_validation_notes(self, llm_score: int, heuristic_score: int) -> List[str]:
         """Generate validation notes based on score comparison"""
