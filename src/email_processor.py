@@ -63,8 +63,9 @@ class EmailProcessor:
         except Exception as e:
             # If file missing, fallback to empty set
             self.TRUSTED_DOMAINS = set()
-            # Optionally log error or print warning
-            print(f"WARNING: Could not load trusted domains from {path}: {e}")
+            # Use logging instead of print for better error handling
+            import logging
+            logging.warning(f"Could not load trusted domains from {path}: {e}")
         
     def process_email(self, content: str, is_file_content: bool = False) -> Dict:
         """
