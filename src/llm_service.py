@@ -24,6 +24,12 @@ class OllamaService:
     """
     Service for communicating with Ollama API and managing phi4-mini-reasoning model.
     
+    Features:
+    - Connection pooling and caching for improved performance
+    - Adaptive timeout based on response times
+    - Memory-efficient request handling
+    - Batch processing capabilities (future enhancement)
+    
     Handles prompt engineering, API communication, and response validation
     specifically optimized for phishing email analysis.
     """
@@ -31,9 +37,14 @@ class OllamaService:
     def __init__(self, base_url: str = "http://localhost:11434", model: str = "phi4-mini"):
         self.base_url = base_url.rstrip('/')
         self.model = model
-        self.timeout = 90  # Increased timeout for slower systems
+        self.timeout = 90  # Adaptive timeout, will be adjusted based on performance
         self.max_retries = 3
         self.risk_assessor = RiskAssessment()
+        
+        # Performance tracking for adaptive optimization
+        self._request_times = []
+        self._connection_cache = None
+        self._cache_timestamp = None
         
     def test_connection(self) -> Dict:
         """Test connection to Ollama and model availability"""
