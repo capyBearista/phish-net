@@ -1,5 +1,5 @@
 """
-Sample Email Test Suite for Phish-Net Phase 6 Testing
+Sample Email Test Suite for Phish-Net Testing
 
 This module contains various email samples for testing the phishing detection system:
 - Legitimate emails (expected low risk scores 1-3)

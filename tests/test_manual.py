@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Quick Phase 6 Test - Manual testing of sample emails
+Manual Testing Suite - Quick testing of sample emails
 """
 
 import sys
@@ -53,7 +53,7 @@ def test_single_email(email_key, email_data, llm_service, email_processor):
         return {"success": False, "error": str(e)}
 
 def main():
-    print("🧪 Quick Phase 6 Manual Test")
+    print("🧪 Quick Manual Test Suite")
     print("=" * 50)
     
     # Initialize services

@@ -1,5 +1,5 @@
 """
-Phase 6 Testing Suite - Comprehensive Email Analysis Testing
+Comprehensive Email Analysis Testing Suite
 
 This module runs comprehensive tests on the Phish-Net email analyzer to validate:
 - Detection accuracy across different email types
@@ -33,7 +33,7 @@ except ImportError as e:
 
 
 class PhishNetTestSuite:
-    """Comprehensive test suite for Phase 6 validation"""
+    """Comprehensive test suite for email analysis validation"""
     
     def __init__(self, ollama_url: str = "http://localhost:11434", model: str = "phi4-mini"):
         self.ollama_url = ollama_url
@@ -51,7 +51,7 @@ class PhishNetTestSuite:
         
     def run_all_tests(self, quick_mode: bool = False) -> Dict:
         """Run complete test suite"""
-        print("🧪 Starting Phase 6 Comprehensive Testing Suite")
+        print("🧪 Starting Comprehensive Testing Suite")
         print("=" * 60)
         
         start_time = time.time()
@@ -431,7 +431,7 @@ Read our blog: https://company.com/blog
     def _print_summary(self, summary: Dict):
         """Print formatted test summary"""
         print("\n" + "=" * 60)
-        print("📊 PHASE 6 TEST SUMMARY")
+        print("📊 COMPREHENSIVE TEST SUMMARY")
         print("=" * 60)
         print(f"Overall Status: {'✅ PASS' if summary['overall_status'] == 'PASS' else '❌ FAIL'}")
         print(f"Total Time: {summary['total_execution_time']:.2f}s")
@@ -451,7 +451,7 @@ Read our blog: https://company.com/blog
         """Save test results to JSON file"""
         if filename is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"phase6_test_results_{timestamp}.json"
+            filename = f"comprehensive_test_results_{timestamp}.json"
         
         with open(filename, 'w') as f:
             json.dump(self.test_results, f, indent=2, default=str)
@@ -463,7 +463,7 @@ def main():
     """Main test runner"""
     import argparse
     
-    parser = argparse.ArgumentParser(description='Run Phase 6 Testing Suite')
+    parser = argparse.ArgumentParser(description='Run Comprehensive Testing Suite')
     parser.add_argument('--quick', action='store_true', help='Run quick test mode')
     parser.add_argument('--ollama-url', default='http://localhost:11434', help='Ollama URL')
     parser.add_argument('--model', default='phi4-mini', help='Model name')

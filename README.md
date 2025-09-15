@@ -148,7 +148,7 @@ phish-net/
 
 ### Quick Test
 ```bash
-python tests/quick_test.py
+python tests/test_manual.py
 ```
 
 ### Sample Emails
@@ -189,7 +189,7 @@ If you encounter issues:
 1. Check the error message in the sidebar
 2. Review the troubleshooting guide above
 3. Ensure all prerequisites are met
-4. Try the quick test: `python tests/quick_test.py`
+4. Try the quick test: `python tests/test_manual.py`
 
 ## 📖 FAQ
 
