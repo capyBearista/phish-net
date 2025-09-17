@@ -1,0 +1,26 @@
+From: security-alert@microsoft-services.net
+To: employee@company.com
+Subject: Microsoft 365 Security Alert - Immediate Action Required
+Date: Thu, 28 Sep 2025 11:20:33 +0000
+Message-ID: <alert.urgent@microsoft-services.net>
+
+MICROSOFT SECURITY ALERT
+
+We have detected multiple failed login attempts to your Microsoft 365 account from an unrecognized device.
+
+Location: Unknown (VPN detected)
+Device: Linux/Chrome
+Time: September 28, 2025 11:15 UTC
+
+Your account has been temporarily suspended for security reasons.
+
+TO RESTORE ACCESS IMMEDIATELY:
+Click here to verify your identity: http://microsoft-secure-login.net/verify
+
+⚠️ URGENT: You have 2 hours to verify your account or it will be permanently disabled.
+
+This is an automated security message from Microsoft 365 Security Center.
+
+Do not reply to this email. For support, contact: security@microsoft-services.net
+
+© 2025 Microsoft Corporation. All rights reserved.

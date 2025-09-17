@@ -1,0 +1,28 @@
+From: orders@amazon-delivery.com
+To: shopper@example.com
+Subject: Your Amazon Order #AMZ-789456123 - Delivery Issue
+Date: Thu, 28 Sep 2025 14:35:18 -0800
+Message-ID: <delivery.issue@amazon-delivery.com>
+
+Dear Amazon Customer,
+
+We encountered a delivery issue with your recent order and need to update your payment information.
+
+Order Details:
+Order #: AMZ-789456123
+Item: iPhone 15 Pro Max 256GB
+Amount: $1,199.99
+Status: Payment Declined
+
+Your package is currently held at our fulfillment center. To complete delivery, please update your payment method within 24 hours.
+
+UPDATE PAYMENT: http://amazon-secure-checkout.net/payment-update
+
+If you do not update your information, your order will be cancelled and you may be charged a restocking fee.
+
+For questions about this order, contact customer service at: help@amazon-delivery.com
+
+Thank you,
+Amazon Customer Service
+
+Amazon.com, Inc. | 410 Terry Ave N, Seattle WA 98109-5210
