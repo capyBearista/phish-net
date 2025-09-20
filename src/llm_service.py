@@ -1,14 +1,14 @@
 """
 LLM Service Module for Phish-Net
 
-This module handles communication with Ollama and prompt engineering
-specifically designed for phi4-mini-reasoning model.
+This module handles communication with Ollama and prompt engineering designed for the LLM.
 """
 
 import json
 import requests
 from typing import Dict, List, Optional, Tuple
 import time
+import threading
 from datetime import datetime
 
 # Handle both relative and absolute imports
@@ -22,12 +22,13 @@ except ImportError:
 
 class OllamaService:
     """
-    Service for communicating with Ollama API and managing phi4-mini-reasoning model.
+    Service for communicating with Ollama API and managing the LLM.
     
     Features:
     - Connection pooling and caching for improved performance
     - Adaptive timeout based on response times
     - Memory-efficient request handling
+    - Request cancellation and abort functionality
     - Batch processing capabilities (future enhancement)
     
     Handles prompt engineering, API communication, and response validation
@@ -45,6 +46,10 @@ class OllamaService:
         self._request_times = []
         self._connection_cache = None
         self._cache_timestamp = None
+        
+        # Cancellation support
+        self._cancel_event = threading.Event()
+        self._current_session = None
         
     def test_connection(self) -> Dict:
         """Test connection to Ollama and model availability"""
@@ -104,9 +109,94 @@ class OllamaService:
                 "error_details": error_info
             }
     
+    def cancel_analysis(self):
+        """Cancel any ongoing analysis request and clear context"""
+        self._cancel_event.set()
+        
+        # Clear any ongoing session to prevent context leakage
+        if self._current_session:
+            try:
+                self._current_session.close()
+            except:
+                pass
+            self._current_session = None
+        
+        # Clear any cached connection context
+        self._connection_cache = None
+        self._cache_timestamp = None
+        
+        error_handler.logger.info("Analysis cancellation requested and context cleared")
+    
+    def reset_cancel_state(self):
+        """Reset cancellation state for new analysis and ensure clean context"""
+        self._cancel_event.clear()
+        
+        # Ensure clean session for new analysis
+        if self._current_session:
+            try:
+                self._current_session.close()
+            except:
+                pass
+            self._current_session = None
+    
+    def clear_context(self):
+        """Explicitly clear all context and cached data to ensure session isolation"""
+        # Clear HTTP session
+        if self._current_session:
+            try:
+                self._current_session.close()
+            except:
+                pass
+            self._current_session = None
+        
+        # Clear connection cache
+        self._connection_cache = None
+        self._cache_timestamp = None
+        
+        # Clear performance tracking that might contain residual data
+        self._request_times.clear()
+        
+        error_handler.logger.info("LLM service context cleared for new session")
+    
+    def clear_server_context(self):
+        """Clear any server-side context in Ollama to ensure session isolation"""
+        try:
+            # Send a context-clearing request to Ollama
+            # This uses a minimal prompt to reset any potential server-side state
+            clear_request = {
+                "model": self.model,
+                "prompt": "Clear context.",
+                "stream": False,
+                "options": {
+                    "temperature": 0.0,
+                    "max_tokens": 1
+                }
+            }
+            
+            # Use a fresh session for context clearing
+            with requests.Session() as session:
+                response = session.post(
+                    f"{self.base_url}/api/generate",
+                    json=clear_request,
+                    timeout=5  # Short timeout for context clearing
+                )
+                
+                if response.status_code == 200:
+                    error_handler.logger.debug("Server context cleared successfully")
+                else:
+                    error_handler.logger.warning(f"Context clearing failed with HTTP {response.status_code}")
+                    
+        except Exception as e:
+            # Context clearing is best-effort, don't fail if it doesn't work
+            error_handler.logger.debug(f"Context clearing attempt failed: {e}")
+    
+    def is_cancelled(self) -> bool:
+        """Check if analysis has been cancelled"""
+        return self._cancel_event.is_set()
+    
     def analyze_email(self, processed_email: Dict, advanced_settings: Optional[Dict] = None) -> Dict:
         """
-        Analyze email using phi4-mini-reasoning model.
+        Analyze email using LLM with cancellation support.
         
         Args:
             processed_email: Output from EmailProcessor
@@ -115,6 +205,20 @@ class OllamaService:
         Returns:
             Dict containing analysis results or error information
         """
+        
+        # Reset cancellation state and clear context for new analysis
+        self.reset_cancel_state()
+        self.clear_context()
+        
+        # Optionally clear server-side context for complete isolation
+        # This is done asynchronously to avoid blocking the main analysis
+        try:
+            import threading
+            context_thread = threading.Thread(target=self.clear_server_context, daemon=True)
+            context_thread.start()
+        except Exception:
+            # If threading fails, continue without server context clearing
+            pass
         
         if not processed_email.get("success"):
             return self._create_error_response("Invalid email data provided")
@@ -138,10 +242,22 @@ class OllamaService:
         
         # Make the API request with retries
         for attempt in range(self.max_retries):
+            # Check for cancellation before each attempt
+            if self.is_cancelled():
+                return {
+                    "success": False,
+                    "cancelled": True,
+                    "user_message": "Analysis was cancelled by user",
+                    "timestamp": datetime.now().isoformat()
+                }
+            
             try:
                 start_time = time.time()
                 
-                response = requests.post(
+                # Create session for this request to support cancellation
+                self._current_session = requests.Session()
+                
+                response = self._current_session.post(
                     f"{self.base_url}/api/generate",
                     json=request_data,
                     timeout=self.timeout
@@ -173,13 +289,26 @@ class OllamaService:
                         ErrorCategory.NETWORK_TIMEOUT
                     )
                     return {**error_info, "analysis_failed": True}
-                time.sleep(2 ** attempt)  # Exponential backoff
+                
+                # Check for cancellation during backoff
+                for i in range(2 ** attempt):
+                    if self.is_cancelled():
+                        return {
+                            "success": False,
+                            "cancelled": True,
+                            "user_message": "Analysis was cancelled during retry",
+                            "timestamp": datetime.now().isoformat()
+                        }
+                    time.sleep(1)
                 
             except requests.exceptions.ConnectionError as e:
                 if attempt == self.max_retries - 1:
                     error_info = handle_ollama_error(e, "Cannot connect to Ollama during analysis")
                     return {**error_info, "analysis_failed": True}
-                time.sleep(1)
+                
+                # Check for cancellation during retry delay
+                if not self.is_cancelled():
+                    time.sleep(1)
                 
             except requests.exceptions.RequestException as e:
                 if attempt == self.max_retries - 1:
@@ -188,7 +317,10 @@ class OllamaService:
                         ErrorCategory.NETWORK_TIMEOUT
                     )
                     return {**error_info, "analysis_failed": True}
-                time.sleep(1)
+                
+                # Check for cancellation during retry delay
+                if not self.is_cancelled():
+                    time.sleep(1)
         
         # Max retries exceeded
         error_info = error_handler.handle_error(
@@ -200,7 +332,7 @@ class OllamaService:
     
     def _create_phishing_analysis_prompt(self, processed_email: Dict) -> str:
         """
-        Create a structured prompt for phi4-mini-reasoning model.
+        Create a structured prompt for the LLM.
         
         This prompt is specifically designed to:
         1. Avoid circular thinking loops

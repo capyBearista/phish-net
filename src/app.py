@@ -683,12 +683,13 @@ def test_ollama_connection(ollama_url: str) -> bool:
 
 def analyze_email(email_content: str, ollama_url: str, model_name: str, processed_data: Optional[Dict] = None):
     """
-    Analyze email content for phishing indicators using LLM with performance optimization
+    Analyze email content for phishing indicators using LLM with abort functionality
     
-    Performance features:
+    Features:
     - Connection reuse and caching
     - Streaming progress indicators
     - Memory-efficient processing
+    - User-controlled abort functionality
     - Adaptive timeout management
     """
     
@@ -696,8 +697,15 @@ def analyze_email(email_content: str, ollama_url: str, model_name: str, processe
     start_time = time.time()
     
     # Create progress tracking with enhanced UI
-    progress_bar = st.progress(0)
-    status_text = st.empty()
+    progress_container = st.container()
+    with progress_container:
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        # Create abort button container
+        abort_col1, abort_col2, abort_col3 = st.columns([1, 2, 1])
+        with abort_col2:
+            abort_button = st.empty()
     
     # Memory check - warn if email content is very large
     content_size_mb = len(email_content.encode('utf-8')) / (1024 * 1024)
@@ -723,6 +731,10 @@ def analyze_email(email_content: str, ollama_url: str, model_name: str, processe
         if (st.session_state.ollama_service is None or 
             st.session_state.ollama_service.base_url != ollama_url or 
             st.session_state.ollama_service.model != model_name):
+            
+            # Clear any existing service context before creating new one
+            if st.session_state.ollama_service:
+                st.session_state.ollama_service.clear_context()
             
             st.session_state.ollama_service = OllamaService(ollama_url, model_name)
         
@@ -758,22 +770,55 @@ def analyze_email(email_content: str, ollama_url: str, model_name: str, processe
             results = perform_fallback_analysis(email_content, processed_data)
             
         else:
-            # Step 3: LLM Analysis with comprehensive error handling
+            # Step 3: LLM Analysis with comprehensive error handling and abort functionality
             status_text.text("Running AI analysis...")
             progress_bar.progress(40)
             
-            # Get advanced settings from session state
+            # Show abort button during analysis
+            with abort_button:
+                if st.button("🛑 Cancel Analysis", type="secondary", key="abort_analysis"):
+                    if st.session_state.ollama_service:
+                        # Cancel analysis and clear all context
+                        st.session_state.ollama_service.cancel_analysis()
+                        # Also clear any server-side context for next analysis
+                        try:
+                            st.session_state.ollama_service.clear_server_context()
+                        except:
+                            pass  # Best effort context clearing
+                    status_text.text("❌ Analysis cancelled - context cleared")
+                    progress_bar.progress(100)
+                    st.warning("Analysis was cancelled by user. Context cleared for next analysis.")
+                    return
+            
+            # Get advanced settings from session state including timeout
             advanced_settings = {
                 "temperature": st.session_state.get("temperature", 0.3),
-                "max_tokens": st.session_state.get("max_tokens", 2000)
+                "max_tokens": st.session_state.get("max_tokens", 2000),
+                "timeout": st.session_state.get("timeout", 30)
             }
+            
+            # Update LLM service timeout
+            if st.session_state.ollama_service:
+                st.session_state.ollama_service.timeout = advanced_settings["timeout"]
             
             # Perform LLM analysis with comprehensive error handling
             try:
                 if not processed_data:
                     raise PhishNetError("No processed email data available", ErrorCategory.PARSING_ERROR)
                 
+                status_text.text("🤖 AI model analyzing email...")
+                progress_bar.progress(60)
+                
                 llm_results = llm_service.analyze_email(processed_data, advanced_settings)
+                
+                # Check if analysis was cancelled
+                if llm_results.get("cancelled"):
+                    status_text.text("❌ Analysis cancelled")
+                    progress_bar.progress(100)
+                    # Clear the abort button
+                    abort_button.empty()
+                    st.warning("Analysis was cancelled by user")
+                    return
                 
                 if llm_results.get("success"):
                     # Use the complete enhanced analysis from LLM service
@@ -801,6 +846,7 @@ def analyze_email(email_content: str, ollama_url: str, model_name: str, processe
                     # Show error and return
                     progress_bar.progress(100)
                     status_text.text("❌ Analysis failed")
+                    abort_button.empty()
                     display_error(error_info)
                     return
                     
@@ -826,9 +872,10 @@ def analyze_email(email_content: str, ollama_url: str, model_name: str, processe
         st.session_state.analysis_results = results
         st.session_state.analysis_history.append(results)
         
-        # Clear progress indicators
+        # Clear progress indicators and abort button
         progress_bar.empty()
         status_text.empty()
+        abort_button.empty()
         
         # Show success message with method used
         analysis_method = "AI-powered" if results.get("model_used") else "heuristic"
@@ -842,6 +889,7 @@ def analyze_email(email_content: str, ollama_url: str, model_name: str, processe
     except Exception as e:
         progress_bar.empty()
         status_text.empty()
+        abort_button.empty()
         st.error(f"❌ Analysis failed: {str(e)}")
         
         # Perform emergency fallback
