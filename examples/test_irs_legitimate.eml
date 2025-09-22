@@ -1,0 +1,23 @@
+Received: from mail.irs.gov (mail.irs.gov [192.168.1.1])
+	by recipient.example.com (8.15.2/8.15.2) with ESMTP id 2BSF45a012345
+	Mon, 15 Jan 2024 15:30:00 -0500 (EST)
+From: alerts@irs.gov
+To: taxpayer@example.com
+Subject: Annual Tax Filing Reminder
+Date: Mon, 15 Jan 2024 10:30:00 -0500
+Message-ID: <20240115153000.12345@irs.gov>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+Dear Taxpayer,
+
+This is your annual reminder that tax filing season begins on January 29, 2024.
+
+Key dates to remember:
+- Filing deadline: April 15, 2024
+- Extension deadline: October 15, 2024
+
+You can find forms and information at www.irs.gov/forms
+
+Best regards,
+Internal Revenue Service

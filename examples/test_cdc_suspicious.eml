@@ -1,0 +1,20 @@
+Received: from suspicious-server.tk (suspicious-server.tk [203.0.113.1])
+	by recipient.example.com (8.15.2/8.15.2) with ESMTP id 4DTH67c034567
+	Wed, 28 Sep 2025 19:45:00 -0400 (EDT)
+From: security@cdc.gov
+To: recipient@example.com
+Subject: URGENT: Your Account Will Be Suspended!
+Date: Wed, 28 Sep 2025 15:45:00 -0400
+Message-ID: <20250928194500.54321@cdc.gov>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+URGENT ACTION REQUIRED!
+
+Your CDC account will be suspended in 24 hours unless you verify your credentials immediately!
+
+Click here to verify: http://verify-account-now.suspicious-site.com/login
+
+This is your FINAL WARNING! Act now or lose access forever!
+
+CDC Security Team
