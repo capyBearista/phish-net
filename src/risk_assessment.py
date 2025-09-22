@@ -71,6 +71,28 @@ class RiskAssessment:
             "medium": 0.5,
             "low": 0.0
         }
+        
+        # Domain trust weights (negative values reduce risk score)
+        self.domain_trust_weights = {
+            # Institutional domains - highest trust
+            '.gov': -4,     # Government domains
+            '.mil': -4,     # Military domains  
+            '.edu': -3,     # Educational institutions
+            
+            # Major corporate domains - moderate trust
+            'microsoft.com': -2,
+            'google.com': -2,
+            'apple.com': -2,
+            'amazon.com': -2,
+            'github.com': -2,
+            'linkedin.com': -1,
+            'paypal.com': -1,
+            'twitter.com': -1,
+            'facebook.com': -1,
+            'dropbox.com': -1,
+            'slack.com': -1,
+            'zoom.us': -1
+        }
     
     def validate_risk_score(self, score: int, confidence: str = "medium") -> Tuple[int, bool, str]:
         """
@@ -236,25 +258,30 @@ class RiskAssessment:
         heuristic_flags = []
         heuristic_score = 1  # Start with low risk
         
-        # Improved sender trust evaluation
+        # Enhanced sender trust evaluation with domain weighting
+        sender_domain = metadata.get("sender_domain", "").lower()
+        trust_weight, trust_reason = self.calculate_domain_trust_weight(sender_domain)
+        
         if metadata.get("sender_trusted", False):
             heuristic_score = max(1, min(heuristic_score, 2))  # Cap at very low risk for trusted senders
+            heuristic_flags.append("Sender marked as trusted")
+        elif trust_weight < 0:
+            # Apply trust weight for institutional/corporate domains
+            heuristic_score = max(1, heuristic_score + trust_weight)
+            heuristic_flags.append(f"Trust bonus applied: {trust_reason}")
+        elif self._is_legitimate_corporate_domain(sender_domain):
+            # Corporate domains don't increase risk, they're neutral
+            heuristic_flags.append("Legitimate corporate domain sender")
+        elif sender_domain.endswith(('.ru', '.tk', '.ml', '.ga', '.cf')):
+            # Suspicious TLDs get higher penalty
+            heuristic_score += 4
+            heuristic_flags.append("Suspicious domain TLD detected")
+        elif sender_domain in ['test.com', 'example.com', 'localhost', ''] or 'test' in sender_domain:
+            # Test/example domains are neutral, not suspicious
+            heuristic_flags.append("Test/example domain (neutral)")
         else:
-            # Check if sender is from a legitimate-looking corporate domain
-            sender_domain = metadata.get("sender_domain", "").lower()
-            if self._is_legitimate_corporate_domain(sender_domain):
-                # Corporate domains don't increase risk, they're neutral
-                heuristic_flags.append("Legitimate corporate domain sender")
-            elif sender_domain.endswith(('.ru', '.tk', '.ml', '.ga', '.cf')):
-                # Suspicious TLDs get higher penalty
-                heuristic_score += 4
-                heuristic_flags.append("Suspicious domain TLD detected")
-            elif sender_domain in ['test.com', 'example.com', 'localhost', ''] or 'test' in sender_domain:
-                # Test/example domains are neutral, not suspicious
-                heuristic_flags.append("Test/example domain (neutral)")
-            else:
-                heuristic_score += 1  # Reduced penalty for unknown sender
-                heuristic_flags.append("Unknown sender domain")
+            heuristic_score += 1  # Reduced penalty for unknown sender
+            heuristic_flags.append("Unknown sender domain")
         
         # Check URL analysis
         suspicious_urls = metadata.get("suspicious_url_count", 0)
@@ -278,6 +305,92 @@ class RiskAssessment:
             "validation_notes": self._generate_validation_notes(llm_score, heuristic_score)
         }
     
+    def calculate_domain_trust_weight(self, domain: str) -> Tuple[int, str]:
+        """
+        Calculate trust weight for a domain based on institutional and corporate trust levels.
+        
+        Args:
+            domain: Domain to evaluate (e.g., "example.gov", "microsoft.com")
+            
+        Returns:
+            Tuple of (trust_weight, trust_reason)
+            - trust_weight: Negative value for trusted domains (reduces risk score)
+            - trust_reason: Human-readable explanation of trust level
+        """
+        if not domain:
+            return 0, "No domain provided"
+        
+        domain = domain.lower().strip()
+        
+        # Validation: Reject obviously suspicious patterns even if they contain trusted TLDs
+        suspicious_indicators = [
+            'phishing', 'scam', 'fake', 'verify-account', 'security-alert',
+            'account-suspended', 'urgent-action', 'click-here', 'limited-time'
+        ]
+        
+        if any(indicator in domain for indicator in suspicious_indicators):
+            return 0, f"Domain contains suspicious patterns despite trusted TLD: {domain}"
+        
+        # Check for exact domain matches first
+        if domain in self.domain_trust_weights:
+            weight = self.domain_trust_weights[domain]
+            return weight, f"Known trusted corporate domain: {domain}"
+        
+        # Check for institutional TLD matches
+        for tld, weight in self.domain_trust_weights.items():
+            if tld.startswith('.') and domain.endswith(tld):
+                # Additional validation for institutional domains
+                if self._validate_institutional_domain(domain, tld):
+                    if tld == '.gov':
+                        return weight, f"Government domain (.gov): {domain}"
+                    elif tld == '.mil':
+                        return weight, f"Military domain (.mil): {domain}"
+                    elif tld == '.edu':
+                        return weight, f"Educational institution (.edu): {domain}"
+                else:
+                    return 0, f"Domain failed institutional validation: {domain}"
+        
+        # No trust weight applies
+        return 0, "Domain not in trusted categories"
+    
+    def _validate_institutional_domain(self, domain: str, tld: str) -> bool:
+        """
+        Validate that an institutional domain is legitimate and not spoofed.
+        
+        Args:
+            domain: Full domain to validate
+            tld: The institutional TLD (.gov, .mil, .edu)
+            
+        Returns:
+            bool: True if domain appears legitimate for the institutional type
+        """
+        # Basic structure validation
+        if not domain or domain.count('.') < 1:
+            return False
+        
+        # For .gov domains, should be relatively simple structure
+        if tld == '.gov':
+            # Should not have excessive subdomains or suspicious patterns
+            parts = domain.split('.')
+            if len(parts) > 4:  # e.g., subdomain.agency.gov is ok, but not deep nesting
+                return False
+            return True
+        
+        # For .edu domains, should be educational institutions
+        elif tld == '.edu':
+            # Should not have obvious commercial or suspicious patterns
+            commercial_patterns = ['shop', 'store', 'buy', 'sell', 'market']
+            if any(pattern in domain for pattern in commercial_patterns):
+                return False
+            return True
+        
+        # For .mil domains, should be military structure
+        elif tld == '.mil':
+            # Military domains have specific patterns
+            return True
+        
+        return False
+    
     def _is_legitimate_corporate_domain(self, domain: str) -> bool:
         """
         Check if domain looks like a legitimate corporate domain.
@@ -300,7 +413,10 @@ class RiskAssessment:
         legitimate_services = {
             'github.com', 'microsoft.com', 'google.com', 'apple.com',
             'paypal.com', 'amazon.com', 'twitter.com', 'facebook.com',
-            'linkedin.com', 'dropbox.com', 'slack.com', 'zoom.us'
+            'linkedin.com', 'dropbox.com', 'slack.com', 'zoom.us',
+            'salesforce.com', 'adobe.com', 'atlassian.com', 'stripe.com',
+            'spotify.com', 'netflix.com', 'discord.com', 'reddit.com',
+            'stackoverflow.com', 'gitlab.com', 'bitbucket.org'
         }
         
         if domain in legitimate_services:
