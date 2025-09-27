@@ -2,28 +2,30 @@
 
 A privacy-focused phishing email detection tool that runs locally on your machine using Ollama and AI. Analyze suspicious emails without sending your data to external servers.
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
-![Python](https://img.shields.io/badge/python-3.8+-green.svg)
-![License](https://img.shields.io/badge/license-Educational-orange.svg)
+![Version](https://img.shields.io/badge/version-1.0.0-4695E4.svg?style=flat)
+![License](https://img.shields.io/badge/license-BSD--3-787BDC.svg?style=flat)
+![Local Only](https://img.shields.io/badge/privacy-secure-lightgreen.svg?style=flat)
+
+![Python](https://img.shields.io/badge/python-yellow.svg?style=flat&logo=python&logoColor=white)
+![Streamlit](https://img.shields.io/badge/streamlit-red.svg?style=flat&logo=streamlit&logoColor=white)
+![Ollama](https://img.shields.io/badge/ollama-242424.svg?style=flat&logo=ollama&logoColor=white)
+![Shell](https://img.shields.io/badge/shell-3b8eea.svg?style=flat&logo=gnubash&logoColor=white)
 
 ## Features
 
-- **Privacy First**: All analysis happens locally - no data sent to external servers
+- **Privacy First**: All analysis happens on your machine - no data sent to external servers
 - **AI-Powered**: Uses local LLM via Ollama for intelligent phishing detection  
-- **Simple Interface**: Clean, intuitive web interface built with Streamlit
-- **Multiple Input Methods**: Paste email text or upload .eml files
-- **Risk Scoring**: Clear risk levels (Low/Medium/High) with detailed explanations
-- **Detailed Analysis**: Comprehensive red flag detection with explanations
-- **Analysis History**: Keep track of previous analyses
-- **Real-time Status**: Connection monitoring and error handling
+- **Simple Interface**: Clean, responsive web interface built with Streamlit
+- **Multiple Input Methods**: Paste email content or upload the .eml file
+- **Risk Scoring**: 1-10 risk scale with clear Low/Medium/High levels and detailed red flag explanations
 
 ## Prerequisites
 
 Before installing Phish-Net, ensure you have:
 
-- **Python 3.8 or higher** - [Download Python](https://python.org/downloads/)
-- **Ollama** - [Download Ollama](https://ollama.ai/)
-- **Compatible LLM model** (recommended: phi4-mini-reasoning)
+- **Python 3.8 or higher** - [Python](https://python.org/downloads/)
+- **Ollama** - [Ollama](https://ollama.com/)
+- **An LLM model** (recommended: phi4-mini-reasoning)
 
 ## Installation
 
@@ -31,7 +33,7 @@ Before installing Phish-Net, ensure you have:
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/your-username/phish-net.git
+   git clone https://github.com/capyBearista/phish-net.git
    cd phish-net
    ```
 
@@ -41,7 +43,7 @@ Before installing Phish-Net, ensure you have:
    python3 -m venv .venv
    source .venv/bin/activate
 
-   # Windows
+   # Windows (Command Prompt)
    python -m venv .venv
    .venv\Scripts\activate
    ```
@@ -53,7 +55,7 @@ Before installing Phish-Net, ensure you have:
 
 4. **Set up Ollama model**
    ```bash
-   # Install and start Ollama (if not already done)
+   # Install and start Ollama
    ollama pull phi4-mini-reasoning
    # Alternative models: phi4-mini, llama3.1, mistral, codellama
    ```
@@ -62,7 +64,7 @@ Before installing Phish-Net, ensure you have:
 
 #### Windows
 ```batch
-# Use the provided batch script
+# Use the provided batch script (requires virtual environment setup first)
 run.bat
 ```
 
@@ -137,6 +139,9 @@ phish-net/
 │   └── phases.md          # Development phases
 ├── examples/              # Sample emails for testing
 ├── tests/                 # Test files and utilities
+│   ├── sample_emails.py   # Test data for automated testing
+│   └── test_*.py          # Component and integration tests
+├── examples/              # Sample .eml files for testing
 ├── trusted_domains.txt    # Trusted domains list
 ├── requirements.txt       # Python dependencies
 ├── run.bat               # Windows launcher
@@ -147,8 +152,10 @@ phish-net/
 ## 🧪 Testing
 
 ### Quick Test
+Test the installation and basic functionality:
 ```bash
-python tests/test_manual.py
+# From project directory with virtual environment activated
+python tests/test_comprehensive.py
 ```
 
 ### Sample Emails
@@ -168,9 +175,9 @@ Test with provided examples:
 
 #### "Model not found"
 **Solution:**
-1. Pull the required model: `ollama pull phi4-mini`
+1. Pull the required model: `ollama pull phi4-mini-reasoning`
 2. Check available models: `ollama list`
-3. Update model name in settings
+3. Update model name in settings (default: phi4-mini-reasoning)
 
 #### "Analysis timeout" 
 **Solution:**
@@ -181,20 +188,20 @@ Test with provided examples:
 #### Python/Dependency Issues
 **Solution:**
 1. Ensure Python 3.8+: `python --version`
-2. Reinstall dependencies: `pip install -r requirements.txt --force-reinstall`
-3. Check virtual environment is active
+2. Activate virtual environment: `.venv\Scripts\activate` (Windows) or `source .venv/bin/activate` (Linux/Mac)
+3. Reinstall dependencies: `pip install -r requirements.txt --force-reinstall`
 
 ### Getting Help
 If you encounter issues:
-1. Check the error message in the sidebar
+1. Check the error message in the sidebar system health panel
 2. Review the troubleshooting guide above
-3. Ensure all prerequisites are met
-4. Try the quick test: `python tests/test_manual.py`
+3. Ensure all prerequisites are met (Python 3.8+, Ollama running, model available)
+4. Try the quick test: `python tests/test_comprehensive.py`
 
 ## 📖 FAQ
 
 **Q: Is my email data sent anywhere?**
-A: No, all analysis happens locally on your machine. No data is sent to external servers.
+A: No, all analysis happens locally on your machine. No data leaves your computer.
 
 **Q: What email formats are supported?**
 A: Both plain text emails (with headers) and .eml files are supported.
@@ -220,23 +227,14 @@ A: The tool focuses on content analysis and doesn't perform technical email auth
 
 ## 🤝 Contributing
 
-This is an educational project. Contributions and suggestions are welcome:
+This is an educational project focused on local privacy-preserving phishing detection. Contributions and suggestions are welcome!
 
 1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## 📄 License
-
-This project is for educational purposes.
-
-## 🙏 Acknowledgments
-
-- Built with [Streamlit](https://streamlit.io/) for the web interface
-- Powered by [Ollama](https://ollama.ai/) for local AI processing
-- Uses various open-source Python libraries
+2. Set up the development environment following the installation guide
+3. Create a feature branch for your changes
+4. Test your changes with the provided test suite
+5. Submit a pull request with a clear description of improvements
 
 ---
 
-**⚠️ Disclaimer**: This tool is for educational purposes and should not be the sole method for determining email safety. Always exercise caution with suspicious emails and consider multiple security measures.
+**⚠️ Disclaimer**: This tool is for educational purposes and should not be the sole method for determining email safety. Always exercise caution—and common sense—with suspicious emails.
