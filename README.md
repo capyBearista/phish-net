@@ -23,7 +23,7 @@ Before installing Phish-Net, ensure you have:
 
 - **Python 3.8 or higher** - [Download Python](https://python.org/downloads/)
 - **Ollama** - [Download Ollama](https://ollama.ai/)
-- **Compatible LLM model** (recommended: phi4-mini)
+- **Compatible LLM model** (recommended: phi4-mini-reasoning)
 
 ## Installation
 
