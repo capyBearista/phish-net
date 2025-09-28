@@ -46,6 +46,12 @@ class OllamaService:
         self._request_times = []
         self._connection_cache = None
         self._cache_timestamp = None
+        self._performance_stats = {
+            'total_requests': 0,
+            'successful_requests': 0,
+            'average_response_time': 0.0,
+            'last_request_time': None
+        }
         
         # Cancellation support
         self._cancel_event = threading.Event()
@@ -1263,6 +1269,10 @@ Begin final intent assessment. Output only JSON:
         Returns:
             Dict containing comprehensive analysis results or error information
         """
+        
+        # Performance tracking start
+        analysis_start_time = time.time()
+        self._performance_stats['total_requests'] += 1
         
         # Reset cancellation state and clear context for new analysis
         self.reset_cancel_state()
