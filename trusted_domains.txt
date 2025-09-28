@@ -1,11 +1,18 @@
 # List of trusted email domains (one per line)
+
+# Version Control & Development
 github.com
 gitlab.com
 bitbucket.org
+
+# Microsoft Services
 microsoft.com
 outlook.com
 live.com
 hotmail.com
+msn.com
+
+# Google Services
 google.com
 gmail.com
 googlemail.com
@@ -26,7 +33,6 @@ zoom.us
 notion.so
 atlassian.com
 atlassian.net
-# More domains to be added...
 aa.com
 abc.com
 abcnews.com
