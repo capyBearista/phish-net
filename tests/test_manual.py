@@ -36,8 +36,12 @@ def test_single_email(email_key, email_data, llm_service, email_processor):
             red_flags = analysis_result.get("red_flags", [])
             if red_flags:
                 print(f"   Red Flags: {len(red_flags)}")
-                for flag in red_flags[:3]:  # Show first 3
-                    print(f"     • {flag}")
+                # Ensure red_flags is a list before slicing
+                if isinstance(red_flags, list):
+                    for flag in red_flags[:3]:  # Show first 3
+                        print(f"     • {flag}")
+                else:
+                    print(f"     • {red_flags}")  # Handle case where it's not a list
             
             return {
                 "success": True,

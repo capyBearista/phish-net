@@ -94,6 +94,20 @@ class RiskAssessment:
             'zoom.us': -1
         }
     
+    def get_domain_trust_weight(self, domain: str) -> int:
+        """
+        Wrapper method for backward compatibility with tests.
+        Returns just the trust weight value from calculate_domain_trust_weight.
+        
+        Args:
+            domain: Domain to evaluate
+            
+        Returns:
+            int: Trust weight (negative for trusted domains)
+        """
+        weight, _ = self.calculate_domain_trust_weight(domain)
+        return weight
+    
     def validate_risk_score(self, score: int, confidence: str = "medium") -> Tuple[int, bool, str]:
         """
         Validate and potentially adjust risk score.
@@ -349,6 +363,15 @@ class RiskAssessment:
                         return weight, f"Educational institution (.edu): {domain}"
                 else:
                     return 0, f"Domain failed institutional validation: {domain}"
+        
+        # Check for subdomain matches with trusted corporate domains
+        # Extract parent domain by taking last two parts (e.g., api.github.com -> github.com)
+        domain_parts = domain.split('.')
+        if len(domain_parts) >= 2:
+            parent_domain = '.'.join(domain_parts[-2:])
+            if parent_domain in self.domain_trust_weights and parent_domain != domain:
+                weight = self.domain_trust_weights[parent_domain]
+                return weight, f"Subdomain of trusted corporate domain: {parent_domain}"
         
         # No trust weight applies
         return 0, "Domain not in trusted categories"

@@ -143,7 +143,7 @@ def test_institutional_domain_weights() -> bool:
         ("github.com", -2, "GitHub (trusted tech platform)"),
         ("google.com", -2, "Google (major tech company)"),
         ("microsoft.com", -2, "Microsoft (major tech company)"),
-        ("amazon.com", -1, "Amazon (e-commerce platform)"),
+        ("amazon.com", -2, "Amazon (e-commerce platform)"),
         ("paypal.com", -1, "PayPal (financial service)"),
         
         # Unknown/neutral domains

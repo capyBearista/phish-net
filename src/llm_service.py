@@ -937,10 +937,19 @@ Base Score = Structural Risk + Content Risk
 Adjusted Score = Base Score + Trust Weight  
 Final Score = max(1, min(10, Adjusted Score))
 
-INTENT CATEGORIES:
+CRITICAL: Trust weight application is MANDATORY and MATHEMATICAL:
+- Government domains (.gov): Trust weight -4 means SUBTRACT 4 from base score
+- Educational domains (.edu): Trust weight -3 means SUBTRACT 3 from base score  
+- Trusted corporate domains: Trust weight -2 means SUBTRACT 2 from base score
+- If trust weight is negative, it STRONGLY indicates legitimate sender
+
+INTENT CATEGORIES WITH TRUST WEIGHTING:
 - LEGITIMATE: Business communication, newsletters, notifications (1-3)
+  * Especially from trusted domains (.gov, .edu, major corporations)
 - SUSPICIOUS: Unsolicited offers, unclear intent (4-6) 
+  * Usually from unknown or unverified domains
 - MALICIOUS: Clear phishing attempt, credential harvesting (7-10)
+  * Rarely from genuinely trusted domains unless clear indicators present
 
 RECOMMENDATION LOGIC:
 - ignore: Risk score 1-3, legitimate business communication
